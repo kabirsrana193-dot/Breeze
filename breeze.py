@@ -462,7 +462,7 @@ if st.session_state.api_call_count > 4500:
     st.warning(f"⚠️ API calls today: {st.session_state.api_call_count}/5000. Approaching daily limit!")
 
 # Main tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📰 News", "📈 Technical Signals", "💹 Charts & Indicators", "⚡ Intraday Monitor"])
+tab1, tab2, tab3 = st.tabs(["📰 News", "💹 Charts & Indicators", "⚡ Intraday Monitor"])
 
 # TAB 1: NEWS
 with tab1:
@@ -550,102 +550,8 @@ with tab1:
     else:
         st.info("No articles found. Click 'Refresh News' to load.")
 
-# TAB 2: TECHNICAL ANALYSIS - AUTO ANALYZE ALL
+# TAB 2: STOCK CHARTS WITH SMA/EMA
 with tab2:
-    st.title("📈 Technical Signals - All Stocks Auto-Analyzed")
-    st.markdown("🎯 Enhanced scoring: 0 (Strong Sell) to 10 (Strong Buy)")
-    
-    if not st.session_state.breeze_connected:
-        st.error("⚠️ Breeze API not connected. Please check credentials.")
-    else:
-        st.markdown("---")
-        
-        col1, col2 = st.columns([1, 3])
-        
-        with col1:
-            if st.button("🔄 Analyze All Stocks", type="primary", use_container_width=True, key="analyze_all_btn"):
-                st.session_state.technical_data = []
-                
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                total_stocks = len(FNO_STOCKS)
-                
-                for idx, stock_name in enumerate(FNO_STOCKS):
-                    stock_code = STOCK_CODE_MAP.get(stock_name)
-                    if not stock_code:
-                        continue
-                    
-                    status_text.text(f"Analyzing {stock_name}... ({idx+1}/{total_stocks})")
-                    
-                    signal_data = generate_signal_enhanced(stock_code)
-                    if signal_data:
-                        signal_data['stock'] = stock_name
-                        st.session_state.technical_data.append(signal_data)
-                    
-                    progress_bar.progress((idx + 1) / total_stocks)
-                
-                progress_bar.empty()
-                status_text.empty()
-                st.success(f"✅ Analyzed {len(st.session_state.technical_data)} stocks!")
-                st.rerun()
-        
-        with col2:
-            st.info("💡 Click 'Analyze All Stocks' to run technical analysis on all F&O stocks. This may take a few minutes due to API rate limits.")
-        
-        if st.session_state.technical_data:
-            df_tech = pd.DataFrame(st.session_state.technical_data)
-            
-            st.subheader("📊 Signal Summary")
-            col1, col2, col3, col4, col5 = st.columns(5)
-            
-            with col1:
-                st.metric("🟢 Strong Buy", len(df_tech[df_tech['recommendation'] == '🟢 STRONG BUY']))
-            with col2:
-                st.metric("🟡 Buy", len(df_tech[df_tech['recommendation'] == '🟡 BUY']))
-            with col3:
-                st.metric("⚪ Hold", len(df_tech[df_tech['recommendation'] == '⚪ HOLD']))
-            with col4:
-                st.metric("🟠 Sell", len(df_tech[df_tech['recommendation'] == '🟠 SELL']))
-            with col5:
-                st.metric("🔴 Strong Sell", len(df_tech[df_tech['recommendation'] == '🔴 STRONG SELL']))
-            
-            st.markdown("---")
-            
-            # Sort by score
-            df_tech = df_tech.sort_values('score', ascending=False)
-            
-            # Display as cards
-            for _, row in df_tech.iterrows():
-                # Color based on score
-                if row['score'] >= 8:
-                    card_color = "#d4edda"
-                elif row['score'] >= 6.5:
-                    card_color = "#fff3cd"
-                elif row['score'] >= 4.5:
-                    card_color = "#f8f9fa"
-                elif row['score'] >= 3:
-                    card_color = "#fff3cd"
-                else:
-                    card_color = "#f8d7da"
-                
-                with st.expander(f"{row['emoji']} {row['stock']} - Score: {row['score']:.1f}/10 @ ₹{row['price']:.2f}"):
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.markdown(f"**Price:** ₹{row['price']:.2f}")
-                        st.markdown(f"**Score:** {row['score']:.1f}/10")
-                    with col2:
-                        st.markdown(f"**RSI:** {row['rsi']:.2f}")
-                        st.markdown(f"**MACD:** {row['macd']:.4f}")
-                    with col3:
-                        st.markdown(f"**SMA 20:** ₹{row['sma_20']:.2f}")
-                        st.markdown(f"**SMA 50:** ₹{row['sma_50']:.2f}")
-                    st.markdown(f"**Signals:** {row['signals']}")
-        else:
-            st.info("👆 Click 'Analyze All Stocks' to generate signals for all F&O stocks")
-
-# TAB 3: STOCK CHARTS WITH SMA/EMA
-with tab3:
     st.title("💹 Stock Charts with SMA & EMA")
     st.markdown("Candlestick charts with technical indicators")
     
@@ -845,8 +751,8 @@ with tab3:
         else:
             st.error(f"⚠️ Stock code not found for {selected_chart_stock}")
 
-# TAB 4: INTRADAY MULTI-CHART MONITOR
-with tab4:
+# TAB 3: INTRADAY MULTI-CHART MONITOR
+with tab3:
     st.title("⚡ Intraday Multi-Chart Monitor")
     st.markdown("Real-time intraday candlestick charts for active trading")
     
