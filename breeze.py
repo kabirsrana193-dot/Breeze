@@ -203,7 +203,6 @@ STOCK_CODE_MAP = {
     "RBL Bank": "RBLBAN",
     "Yes Bank": "YESBAN",
     "City Union Bank": "CITUNI",
-    "Karur Vysya Bank": “KARVYS”,
     "Manappuram Finance": "MANAFI”,
     "PNB Housing": "PNBHOU",
     "Can Fin Homes": "CANHOM",
