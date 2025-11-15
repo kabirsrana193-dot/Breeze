@@ -20,9 +20,9 @@ st.set_page_config(
 # --------------------------
 # IMPORTANT: Replace these with your actual credentials
 BREEZE_CONFIG = {
-    'app_key': "YOUR_APP_KEY_HERE",  # Fixed: Removed invalid characters
-    'secret_key': "YOUR_SECRET_KEY_HERE",  # Fixed: Removed invalid characters
-    'session_token': "YOUR_SESSION_TOKEN_HERE"
+    'app_key': "68`47N89970w1dH7u1s5347j8403f287",
+    'secret_key': "5v9k141093cf4361528$z24Q7(Yv2839",
+    'session_token': "53705299"
 }
 
 # --------------------------
