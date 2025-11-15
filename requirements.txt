@@ -1,1 +1,6 @@
-Breeze_connect
+streamlit==1.28.0
+feedparser==6.0.10
+pandas==2.1.1
+numpy==1.24.3
+plotly==5.17.0
+breeze-connect==1.0.31
