@@ -747,7 +747,7 @@ st.caption("⚠ **Disclaimer:** For educational purposes only. Not financial adv
 if st.session_state.breeze_connected:
     st.caption("🔌 **Connection Status:** ✅ Connected to Breeze API")
 else:
-    st.caption("🔌 **Connection Status:** ❌ Disconnected - Update credentials to connect") STOCK_CODE_MAP.get(stock_name)
+    st.caption("🔌 **Connection Status:** ❌ Disconnected - Update credentials to connect") 
                     if not stock_code:
                         continue
                     
