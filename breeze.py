@@ -120,6 +120,36 @@ def connect_breeze():
         st.error(f"❌ Breeze connection failed: {str(e)}")
         return None, False
 
+def subscribe_to_stock(breeze, stock_code):
+    """Subscribe to a stock for live data"""
+    try:
+        breeze.subscribe_feeds(
+            exchange_code="NSE",
+            stock_code=stock_code,
+            product_type="cash",
+            get_market_depth=False,
+            get_exchange_quotes=True
+        )
+        return True
+    except Exception as e:
+        return False
+
+def subscribe_all_fno_stocks():
+    """Subscribe to all F&O stocks"""
+    breeze = st.session_state.breeze_client
+    if not breeze:
+        return 0
+    
+    subscribed = 0
+    for stock_name in FNO_STOCKS[:30]:  # Subscribe to top 30
+        stock_code = STOCK_CODE_MAP.get(stock_name)
+        if stock_code:
+            if subscribe_to_stock(breeze, stock_code):
+                subscribed += 1
+            time.sleep(0.1)  # Small delay to avoid rate limits
+    
+    return subscribed
+
 # Connect to Breeze on first load
 if not st.session_state.breeze_connected:
     with st.spinner("🔌 Connecting to Breeze API..."):
@@ -128,7 +158,13 @@ if not st.session_state.breeze_connected:
             st.session_state.breeze_client = breeze
             st.session_state.breeze_connected = True
             st.success("✅ Connected to Breeze API!")
-            time.sleep(1)
+            
+            # Subscribe to all stocks
+            with st.spinner("📡 Subscribing to F&O stocks..."):
+                subscribed = subscribe_all_fno_stocks()
+                if subscribed > 0:
+                    st.success(f"✅ Subscribed to {subscribed} stocks!")
+                    time.sleep(1)
         else:
             st.error("⚠️ Could not connect to Breeze. Please check your credentials.")
 
@@ -142,6 +178,10 @@ def fetch_stock_data_breeze(stock_code, days=90):
         breeze = st.session_state.breeze_client
         if not breeze:
             return pd.DataFrame()
+        
+        # Subscribe to stock first
+        subscribe_to_stock(breeze, stock_code)
+        time.sleep(0.2)  # Small delay after subscription
         
         # Calculate dates
         to_date = datetime.now()
@@ -190,6 +230,10 @@ def get_live_quote(stock_code):
         breeze = st.session_state.breeze_client
         if not breeze:
             return None
+        
+        # Subscribe to stock first
+        subscribe_to_stock(breeze, stock_code)
+        time.sleep(0.2)
         
         response = breeze.get_quotes(
             stock_code=stock_code,
