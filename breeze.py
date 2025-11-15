@@ -19,11 +19,10 @@ st.set_page_config(
 # Breeze Configuration
 # --------------------------
 # IMPORTANT: Replace these with your actual credentials
-BREEZE_CONFIG = {
-    'app_key': "68`47N89970w1dH7u1s5347j8403f287",
-    'secret_key': "5v9k141093cf4361528$z24Q7(Yv2839",
-    'session_token': "53705299"
-}
+app_key = "68`47N89970w1dH7u1s5347j8403f287"
+secret_key = "5v9k141093cf4361528$z24Q7(Yv2839"
+session_token = "53705299"
+
 
 # --------------------------
 # Config - Top F&O Stocks
@@ -109,22 +108,13 @@ if 'subscribed_stocks' not in st.session_state:
 # --------------------------
 # Breeze Connection
 # --------------------------
-def connect_breeze():
-    """Initialize Breeze connection with improved error handling"""
-    try:
-        # Validate credentials first
-        if (BREEZE_CONFIG['app_key'] == "YOUR_APP_KEY_HERE" or 
-            BREEZE_CONFIG['secret_key'] == "YOUR_SECRET_KEY_HERE" or
-            BREEZE_CONFIG['session_token'] == "YOUR_SESSION_TOKEN_HERE"):
-            return None, False, "⚠️ Please update your Breeze API credentials in the code"
-        
-        breeze = BreezeConnect(api_key=BREEZE_CONFIG['app_key'])
-        
-        # Generate session
-        session_response = breeze.generate_session(
-            api_secret=BREEZE_CONFIG['secret_key'],
-            session_token=BREEZE_CONFIG['session_token']
-        )
+breeze = BreezeConnect(api_key=app_key)
+
+# Generate Session
+
+breeze.generate_session(api_secret=secret_key,
+                        session_token=session_token)
+
         
         # Check if session generation was successful
         if session_response and 'Success' in session_response:
