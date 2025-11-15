@@ -3,10 +3,8 @@ import feedparser
 import pandas as pd
 from datetime import datetime, timedelta
 import time
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from functools import lru_cache
 from breeze_connect import BreezeConnect
 
 # Page config
@@ -21,11 +19,9 @@ st.set_page_config(
 # Breeze Configuration
 # --------------------------
 # IMPORTANT: Replace these with your actual credentials
-BREEZE_CONFIG = {
-    'app_key': "68`47N89970w1dH7u1s5347j8403f287",
-    'secret_key': "5v9k141093cf4361528$z24Q7(Yv2839",
-    'session_token': "53705299"
-}
+BREEZE_CONFIG = { 'app_key': "68`47N89970w1dH7u1s5347j8403f287",
+                 'secret_key': "5v9k141093cf4361528$z24Q7(Yv2839", 
+                 'session_token': "53705299" }
 
 # --------------------------
 # Config - Top F&O Stocks
@@ -46,26 +42,26 @@ FNO_STOCKS = [
     "Bharat Electronics", "BEL", "HAL", "Shriram Finance", "IRCTC"
 ]
 
-# Stock code mapping for Breeze API
+# Stock code mapping for Breeze API (Fixed: Corrected stock codes)
 STOCK_CODE_MAP = {
-    "Reliance": "RELIND", "TCS": "TCS", "HDFC Bank": "HDFCBK",
-    "Infosys": "INFOSYSTCH", "ICICI Bank": "ICIBK", "Bharti Airtel": "BHARTIARTL",
+    "Reliance": "RELIANCE", "TCS": "TCS", "HDFC Bank": "HDFCBANK",
+    "Infosys": "INFY", "ICICI Bank": "ICICIBANK", "Bharti Airtel": "BHARTIARTL",
     "ITC": "ITC", "State Bank of India": "SBIN", "SBI": "SBIN",
     "Hindustan Unilever": "HINDUNILVR", "HUL": "HINDUNILVR",
-    "Bajaj Finance": "BAJAJFINSV", "Kotak Mahindra Bank": "KOTAKBANK",
-    "Axis Bank": "AXSB", "Larsen & Toubro": "LT", "L&T": "LT",
+    "Bajaj Finance": "BAJFINANCE", "Kotak Mahindra Bank": "KOTAKBANK",
+    "Axis Bank": "AXISBANK", "Larsen & Toubro": "LT", "L&T": "LT",
     "Asian Paints": "ASIANPAINT", "Maruti Suzuki": "MARUTI",
     "Titan": "TITAN", "Sun Pharma": "SUNPHARMA", "HCL Tech": "HCLTECH",
     "Adani Enterprises": "ADANIENT", "Tata Motors": "TATAMOTORS",
-    "Wipro": "WIPRO", "NTPC": "NTPC", "Bajaj Finserv": "BAJFINANCE",
-    "Tata Steel": "TATASTL", "Hindalco": "HINDALCO",
+    "Wipro": "WIPRO", "NTPC": "NTPC", "Bajaj Finserv": "BAJAJFINSV",
+    "Tata Steel": "TATASTEEL", "Hindalco": "HINDALCO",
     "IndusInd Bank": "INDUSINDBK", "Mahindra & Mahindra": "M&M",
     "M&M": "M&M", "Coal India": "COALINDIA", "JSW Steel": "JSWSTEEL",
     "Tata Consumer": "TATACONSUM", "Eicher Motors": "EICHERMOT",
     "BPCL": "BPCL", "Tech Mahindra": "TECHM", "Dr Reddy": "DRREDDY",
     "Cipla": "CIPLA", "UPL": "UPL", "Britannia": "BRITANNIA",
     "Divi's Lab": "DIVISLAB", "ONGC": "ONGC", "IOC": "IOC",
-    "Vedanta": "VEDL", "Bajaj Auto": "BAJAJAUTO", "SBI Life": "SBILIFE",
+    "Vedanta": "VEDL", "Bajaj Auto": "BAJAJ-AUTO", "SBI Life": "SBILIFE",
     "HDFC Life": "HDFCLIFE", "Adani Ports": "ADANIPORTS",
     "UltraTech": "ULTRACEMCO", "Hero MotoCorp": "HEROMOTOCO",
     "GAIL": "GAIL", "Zomato": "ZOMATO", "Trent": "TRENT",
@@ -91,6 +87,8 @@ if 'breeze_client' not in st.session_state:
     st.session_state.breeze_client = None
 if 'breeze_connected' not in st.session_state:
     st.session_state.breeze_connected = False
+if 'connection_error' not in st.session_state:
+    st.session_state.connection_error = None
 if 'news_articles' not in st.session_state:
     st.session_state.news_articles = []
 if 'selected_stock' not in st.session_state:
@@ -103,6 +101,8 @@ if 'watchlist_stocks' not in st.session_state:
     ]
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = None
+if 'subscribed_stocks' not in st.session_state:
+    st.session_state.subscribed_stocks = set()
 
 # --------------------------
 # Breeze Connection
@@ -115,84 +115,82 @@ def connect_breeze():
             api_secret=BREEZE_CONFIG['secret_key'],
             session_token=BREEZE_CONFIG['session_token']
         )
-        return breeze, True
+        
+        # Check if session generation was successful
+        if session_response and 'Success' in session_response:
+            return breeze, True, None
+        else:
+            error_msg = session_response.get('Error', 'Unknown error') if session_response else 'No response'
+            return None, False, f"Session generation failed: {error_msg}"
+            
     except Exception as e:
-        st.error(f"❌ Breeze connection failed: {str(e)}")
-        return None, False
+        error_msg = str(e)
+        if "Invalid Session" in error_msg:
+            return None, False, "❌ Invalid session token. Please generate a new session token from ICICI Direct."
+        elif "Invalid API Key" in error_msg:
+            return None, False, "❌ Invalid API key. Please check your app_key."
+        else:
+            return None, False, f"❌ Connection failed: {error_msg}"
 
 def subscribe_to_stock(breeze, stock_code):
-    """Subscribe to a stock for live data"""
+    """Subscribe to a stock for live data with error handling"""
     try:
-        breeze.subscribe_feeds(
+        # Check if already subscribed
+        if stock_code in st.session_state.subscribed_stocks:
+            return True
+            
+        response = breeze.subscribe_feeds(
             exchange_code="NSE",
             stock_code=stock_code,
             product_type="cash",
             get_market_depth=False,
             get_exchange_quotes=True
         )
-        return True
+        
+        if response and 'Success' in response:
+            st.session_state.subscribed_stocks.add(stock_code)
+            return True
+        return False
     except Exception as e:
+        # Silently fail for subscription errors
         return False
 
-def subscribe_all_fno_stocks():
-    """Subscribe to all F&O stocks"""
-    breeze = st.session_state.breeze_client
-    if not breeze:
-        return 0
-    
-    subscribed = 0
-    for stock_name in FNO_STOCKS[:30]:  # Subscribe to top 30
-        stock_code = STOCK_CODE_MAP.get(stock_name)
-        if stock_code:
-            if subscribe_to_stock(breeze, stock_code):
-                subscribed += 1
-            time.sleep(0.1)  # Small delay to avoid rate limits
-    
-    return subscribed
-
 # Connect to Breeze on first load
-if not st.session_state.breeze_connected:
+if not st.session_state.breeze_connected and st.session_state.connection_error is None:
     with st.spinner("🔌 Connecting to Breeze API..."):
-        breeze, success = connect_breeze()
+        breeze, success, error = connect_breeze()
         if success:
             st.session_state.breeze_client = breeze
             st.session_state.breeze_connected = True
+            st.session_state.connection_error = None
             st.success("✅ Connected to Breeze API!")
-            
-            # Subscribe to all stocks
-            with st.spinner("📡 Subscribing to F&O stocks..."):
-                subscribed = subscribe_all_fno_stocks()
-                if subscribed > 0:
-                    st.success(f"✅ Subscribed to {subscribed} stocks!")
-                    time.sleep(1)
+            time.sleep(1)
+            st.rerun()
         else:
-            st.error("⚠️ Could not connect to Breeze. Please check your credentials.")
+            st.session_state.connection_error = error
+            st.error(error)
 
 # --------------------------
 # Stock Data Functions using Breeze
 # --------------------------
 @st.cache_data(ttl=300)
 def fetch_stock_data_breeze(stock_code, days=90, interval="1day"):
-    """Fetch historical stock data using Breeze API
-    
-    Supported intervals: 1minute, 5minute, 30minute, 1day
-    """
+    """Fetch historical stock data using Breeze API with improved error handling"""
     try:
         breeze = st.session_state.breeze_client
         if not breeze:
             return pd.DataFrame()
         
-        # Subscribe to stock first
+        # Subscribe to stock
         subscribe_to_stock(breeze, stock_code)
-        time.sleep(0.2)  # Small delay after subscription
         
         # Calculate dates
         to_date = datetime.now()
         from_date = to_date - timedelta(days=days)
         
-        # Format dates for Breeze API (YYYY-MM-DD HH:MM:SS format)
-        from_date_str = from_date.strftime("%Y-%m-%d") + " 07:00:00"
-        to_date_str = to_date.strftime("%Y-%m-%d") + " 23:59:59"
+        # Format dates for Breeze API
+        from_date_str = from_date.strftime("%Y-%m-%d") + "T07:00:00.000Z"
+        to_date_str = to_date.strftime("%Y-%m-%d") + "T23:59:59.000Z"
         
         # Fetch historical data
         response = breeze.get_historical_data(
@@ -209,84 +207,82 @@ def fetch_stock_data_breeze(stock_code, days=90, interval="1day"):
             if data and len(data) > 0:
                 df = pd.DataFrame(data)
                 
-                # Check column names and rename appropriately
-                column_mapping = {
-                    'datetime': 'Date',
-                    'stock_date_time': 'Date',
-                    'open': 'Open',
-                    'high': 'High',
-                    'low': 'Low',
-                    'close': 'Close',
-                    'volume': 'Volume',
-                    'ltp': 'Close'  # Sometimes close is called ltp
-                }
+                # Flexible column mapping
+                column_mapping = {}
+                for col in df.columns:
+                    col_lower = col.lower()
+                    if 'date' in col_lower or 'time' in col_lower:
+                        column_mapping[col] = 'Date'
+                    elif col_lower == 'open':
+                        column_mapping[col] = 'Open'
+                    elif col_lower == 'high':
+                        column_mapping[col] = 'High'
+                    elif col_lower == 'low':
+                        column_mapping[col] = 'Low'
+                    elif col_lower in ['close', 'ltp']:
+                        column_mapping[col] = 'Close'
+                    elif col_lower == 'volume':
+                        column_mapping[col] = 'Volume'
                 
                 df = df.rename(columns=column_mapping)
                 
                 if 'Date' in df.columns:
-                    df['Date'] = pd.to_datetime(df['Date'])
+                    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+                    df = df.dropna(subset=['Date'])
                     df = df.set_index('Date')
+                    df = df.sort_index()
                     
-                    # Ensure we have the required columns
-                    required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    # Ensure numeric columns
+                    numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    for col in numeric_cols:
+                        if col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+                    
+                    # Remove rows with invalid data
+                    df = df.dropna(subset=['Close'])
+                    
+                    required_cols = ['Open', 'High', 'Low', 'Close']
                     available_cols = [col for col in required_cols if col in df.columns]
                     
-                    if 'Close' in available_cols:
+                    if 'Close' in available_cols and len(df) > 0:
+                        if 'Volume' in df.columns:
+                            available_cols.append('Volume')
                         return df[available_cols]
         
         return pd.DataFrame()
     except Exception as e:
-        st.warning(f"Could not fetch data for {stock_code}: {str(e)}")
         return pd.DataFrame()
-
-@st.cache_data(ttl=60)
-def get_live_quote(stock_code):
-    """Get live quote for a stock"""
-    try:
-        breeze = st.session_state.breeze_client
-        if not breeze:
-            return None
-        
-        # Subscribe to stock first
-        subscribe_to_stock(breeze, stock_code)
-        time.sleep(0.2)
-        
-        response = breeze.get_quotes(
-            stock_code=stock_code,
-            exchange_code="NSE",
-            expiry_date="",
-            product_type="",
-            right="",
-            strike_price=""
-        )
-        
-        if response and 'Success' in response:
-            return response['Success']
-        return None
-    except:
-        return None
 
 # --------------------------
 # Technical Analysis Functions
 # --------------------------
 def calculate_rsi(data, period=14):
     """Calculate RSI indicator"""
-    delta = data.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+    try:
+        delta = data.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        
+        # Avoid division by zero
+        rs = gain / loss.replace(0, 0.0001)
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    except:
+        return pd.Series(index=data.index)
 
 def calculate_macd(data, fast=12, slow=26, signal=9):
     """Calculate MACD indicator"""
-    exp1 = data.ewm(span=fast, adjust=False).mean()
-    exp2 = data.ewm(span=slow, adjust=False).mean()
-    macd = exp1 - exp2
-    signal_line = macd.ewm(span=signal, adjust=False).mean()
-    return macd, signal_line
+    try:
+        exp1 = data.ewm(span=fast, adjust=False).mean()
+        exp2 = data.ewm(span=slow, adjust=False).mean()
+        macd = exp1 - exp2
+        signal_line = macd.ewm(span=signal, adjust=False).mean()
+        return macd, signal_line
+    except:
+        return pd.Series(index=data.index), pd.Series(index=data.index)
 
 def generate_signal(stock_code):
-    """Generate buy/sell signal"""
+    """Generate buy/sell signal with improved error handling"""
     try:
         df = fetch_stock_data_breeze(stock_code, 90, "1day")
         
@@ -296,27 +292,34 @@ def generate_signal(stock_code):
         df['RSI'] = calculate_rsi(df['Close'])
         df['MACD'], df['Signal'] = calculate_macd(df['Close'])
         
-        current_price = df['Close'].iloc[-1]
-        rsi = df['RSI'].iloc[-1]
-        macd = df['MACD'].iloc[-1]
-        signal_line = df['Signal'].iloc[-1]
+        # Get latest valid values
+        df_clean = df.dropna(subset=['Close', 'RSI', 'MACD', 'Signal'])
+        if df_clean.empty:
+            return None
+        
+        current_price = df_clean['Close'].iloc[-1]
+        rsi = df_clean['RSI'].iloc[-1]
+        macd = df_clean['MACD'].iloc[-1]
+        signal_line = df_clean['Signal'].iloc[-1]
         
         score = 0
         signals = []
         
-        if rsi < 30:
-            signals.append("RSI Oversold")
-            score += 2
-        elif rsi > 70:
-            signals.append("RSI Overbought")
-            score -= 2
+        if pd.notna(rsi):
+            if rsi < 30:
+                signals.append("RSI Oversold")
+                score += 2
+            elif rsi > 70:
+                signals.append("RSI Overbought")
+                score -= 2
         
-        if macd > signal_line:
-            signals.append("MACD Bullish")
-            score += 1
-        else:
-            signals.append("MACD Bearish")
-            score -= 1
+        if pd.notna(macd) and pd.notna(signal_line):
+            if macd > signal_line:
+                signals.append("MACD Bullish")
+                score += 1
+            else:
+                signals.append("MACD Bearish")
+                score -= 1
         
         if score >= 2:
             recommendation = "🟢 STRONG BUY"
@@ -333,11 +336,11 @@ def generate_signal(stock_code):
             'price': current_price,
             'rsi': rsi,
             'macd': macd,
-            'signals': ', '.join(signals),
+            'signals': ', '.join(signals) if signals else 'No signals',
             'recommendation': recommendation,
             'score': score
         }
-    except:
+    except Exception as e:
         return None
 
 # --------------------------
@@ -410,6 +413,15 @@ def fetch_news(num_articles=12, specific_stock=None):
 # Streamlit App
 # --------------------------
 
+# Show connection status at top
+if st.session_state.connection_error:
+    st.error(st.session_state.connection_error)
+    st.info("💡 **How to fix:**\n"
+            "1. Update credentials in the code (lines 18-22)\n"
+            "2. Generate a new session token from ICICI Direct\n"
+            "3. Ensure your API key and secret are correct\n"
+            "4. Check if your IP is whitelisted (required from Oct 2025)")
+
 # Main tabs
 tab1, tab2, tab3, tab4 = st.tabs(["📰 News", "📈 Technical", "💹 Charts", "📊 Multi-Chart"])
 
@@ -431,6 +443,7 @@ with tab1:
             index=stock_options.index(st.session_state.selected_stock),
             key="stock_filter"
         )
+        st.session_state.selected_stock = selected_stock
 
     with col2:
         if st.button("🔄 Refresh News", type="primary", use_container_width=True):
@@ -514,7 +527,7 @@ with tab2:
     st.markdown("Buy/Sell signals based on RSI & MACD")
     
     if not st.session_state.breeze_connected:
-        st.error("⚠️ Breeze API not connected. Please check credentials.")
+        st.error("⚠️ Breeze API not connected. Please check credentials in Tab 1.")
     else:
         st.markdown("---")
         
@@ -537,7 +550,204 @@ with tab2:
                 stocks_to_analyze = FNO_STOCKS[:num_stocks]
                 
                 for idx, stock_name in enumerate(stocks_to_analyze):
-                    stock_code = STOCK_CODE_MAP.get(stock_name)
+                    stock_code = STOCK_CODE_MAP.get(selected_chart_stock)
+        
+        if stock_code:
+            with st.spinner(f"Loading data for {selected_chart_stock}..."):
+                df = fetch_stock_data_breeze(stock_code, period_days, interval)
+            
+            if not df.empty and 'Close' in df.columns and len(df) > 0:
+                # Calculate indicators
+                df['RSI'] = calculate_rsi(df['Close'])
+                df['MACD'], df['Signal'] = calculate_macd(df['Close'])
+                
+                # Clean data
+                df_clean = df.dropna(subset=['Close'])
+                
+                if len(df_clean) >= 2:
+                    current_price = df_clean['Close'].iloc[-1]
+                    price_change = df_clean['Close'].iloc[-1] - df_clean['Close'].iloc[0]
+                    price_change_pct = (price_change / df_clean['Close'].iloc[0]) * 100
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Current", f"₹{current_price:.2f}")
+                    with col2:
+                        st.metric("Change", f"₹{price_change:.2f}", f"{price_change_pct:.2f}%")
+                    with col3:
+                        st.metric("High", f"₹{df_clean['High'].max():.2f}" if 'High' in df_clean.columns else "N/A")
+                    with col4:
+                        st.metric("Low", f"₹{df_clean['Low'].min():.2f}" if 'Low' in df_clean.columns else "N/A")
+                    
+                    st.markdown("---")
+                    
+                    # Candlestick chart
+                    if all(col in df_clean.columns for col in ['Open', 'High', 'Low', 'Close']):
+                        fig = go.Figure(data=[go.Candlestick(
+                            x=df_clean.index,
+                            open=df_clean['Open'],
+                            high=df_clean['High'],
+                            low=df_clean['Low'],
+                            close=df_clean['Close']
+                        )])
+                        fig.update_layout(
+                            title=f"{selected_chart_stock} Price Chart ({interval_label})",
+                            xaxis_title="Date",
+                            yaxis_title="Price (₹)",
+                            height=400,
+                            xaxis_rangeslider_visible=False
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        # Line chart fallback
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['Close'], mode='lines', name='Close'))
+                        fig.update_layout(
+                            title=f"{selected_chart_stock} Price Chart ({interval_label})",
+                            xaxis_title="Date",
+                            yaxis_title="Price (₹)",
+                            height=400
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    # RSI chart
+                    df_rsi = df_clean.dropna(subset=['RSI'])
+                    if len(df_rsi) > 0:
+                        fig_rsi = go.Figure()
+                        fig_rsi.add_trace(go.Scatter(x=df_rsi.index, y=df_rsi['RSI'], name='RSI'))
+                        fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought")
+                        fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold")
+                        fig_rsi.update_layout(title="RSI Indicator", height=250, yaxis_range=[0, 100])
+                        st.plotly_chart(fig_rsi, use_container_width=True)
+                    
+                    # MACD chart
+                    df_macd = df_clean.dropna(subset=['MACD', 'Signal'])
+                    if len(df_macd) > 0:
+                        fig_macd = go.Figure()
+                        fig_macd.add_trace(go.Scatter(x=df_macd.index, y=df_macd['MACD'], name='MACD', line=dict(color='blue')))
+                        fig_macd.add_trace(go.Scatter(x=df_macd.index, y=df_macd['Signal'], name='Signal', line=dict(color='red')))
+                        fig_macd.update_layout(title="MACD Indicator", height=250)
+                        st.plotly_chart(fig_macd, use_container_width=True)
+                else:
+                    st.warning(f"⚠️ Insufficient data for {selected_chart_stock}")
+            else:
+                st.error(f"⚠️ Could not fetch data for {selected_chart_stock}")
+                st.info("💡 **Troubleshooting:**\n"
+                       "- Check if the stock code is correct\n"
+                       "- Try a different time period or interval\n"
+                       "- Verify your Breeze API connection is active\n"
+                       "- Some stocks may have limited historical data")
+        else:
+            st.error(f"⚠️ Stock code not found for {selected_chart_stock}")
+
+# --------------------------
+# TAB 4: MULTI-CHART
+# --------------------------
+with tab4:
+    st.title("📊 Multi-Chart Monitor (Breeze)")
+    st.markdown("Track multiple stocks simultaneously")
+    
+    if not st.session_state.breeze_connected:
+        st.error("⚠️ Breeze API not connected. Please check credentials.")
+    else:
+        st.markdown("---")
+        
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col1:
+            selected_watchlist = st.multiselect(
+                "Select stocks",
+                options=sorted(FNO_STOCKS[:30]),
+                default=st.session_state.watchlist_stocks[:5],
+                max_selections=6
+            )
+        
+        with col2:
+            period_multi = st.selectbox("Period", ["1 Week", "2 Weeks", "1 Month"], index=0, key="multi_period")
+            period_map = {"1 Week": 7, "2 Weeks": 14, "1 Month": 30}
+            days = period_map[period_multi]
+        
+        with col3:
+            if st.button("🔄 Refresh", type="primary", use_container_width=True):
+                # Clear cache for fresh data
+                st.cache_data.clear()
+                st.rerun()
+        
+        if selected_watchlist:
+            num_cols = 2 if len(selected_watchlist) <= 4 else 3
+            num_rows = (len(selected_watchlist) + num_cols - 1) // num_cols
+            
+            for row in range(num_rows):
+                cols = st.columns(num_cols)
+                for col_idx, col in enumerate(cols):
+                    stock_idx = row * num_cols + col_idx
+                    
+                    if stock_idx < len(selected_watchlist):
+                        stock_name = selected_watchlist[stock_idx]
+                        stock_code = STOCK_CODE_MAP.get(stock_name)
+                        
+                        with col:
+                            if stock_code:
+                                df = fetch_stock_data_breeze(stock_code, days, "1day")
+                                
+                                if not df.empty and len(df) >= 2 and 'Close' in df.columns:
+                                    df_clean = df.dropna(subset=['Close'])
+                                    
+                                    if len(df_clean) >= 2:
+                                        current = df_clean['Close'].iloc[-1]
+                                        prev = df_clean['Close'].iloc[0]
+                                        
+                                        if pd.notna(current) and pd.notna(prev) and prev != 0:
+                                            change = current - prev
+                                            change_pct = (change / prev) * 100
+                                            color = "green" if change_pct >= 0 else "red"
+                                            arrow = "🟢" if change_pct >= 0 else "🔴"
+                                            
+                                            st.markdown(f"### {arrow} {stock_name}")
+                                            st.metric(
+                                                "Price", 
+                                                f"₹{current:.2f}", 
+                                                f"{change:.2f} ({change_pct:.2f}%)"
+                                            )
+                                            
+                                            fig = go.Figure()
+                                            fig.add_trace(go.Scatter(
+                                                x=df_clean.index,
+                                                y=df_clean['Close'],
+                                                mode='lines',
+                                                line=dict(color=color, width=2),
+                                                fill='tozeroy',
+                                                fillcolor=f'rgba({"0,255,0" if color == "green" else "255,0,0"},0.1)'
+                                            ))
+                                            fig.update_layout(
+                                                height=200,
+                                                margin=dict(l=10, r=10, t=10, b=10),
+                                                showlegend=False,
+                                                xaxis=dict(showgrid=False),
+                                                yaxis=dict(showgrid=True, gridcolor='lightgray')
+                                            )
+                                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                                        else:
+                                            st.warning(f"⚠️ Invalid data for {stock_name}")
+                                    else:
+                                        st.warning(f"⚠️ Insufficient data for {stock_name}")
+                                else:
+                                    st.warning(f"⚠️ No data available for {stock_name}")
+                            else:
+                                st.error(f"⚠️ Stock code not found for {stock_name}")
+        else:
+            st.info("👆 Select stocks from the dropdown to monitor")
+
+# Footer
+st.markdown("---")
+st.caption("💡 F&O Dashboard powered by ICICI Breeze API")
+st.caption("⚠ **Disclaimer:** For educational purposes only. Not financial advice.")
+
+# Connection status
+if st.session_state.breeze_connected:
+    st.caption("🔌 **Connection Status:** ✅ Connected to Breeze API")
+else:
+    st.caption("🔌 **Connection Status:** ❌ Disconnected - Update credentials to connect") STOCK_CODE_MAP.get(stock_name)
                     if not stock_code:
                         continue
                     
@@ -549,10 +759,12 @@ with tab2:
                         st.session_state.technical_data.append(signal_data)
                     
                     progress_bar.progress((idx + 1) / num_stocks)
+                    time.sleep(0.2)  # Rate limiting
                 
                 progress_bar.empty()
                 status_text.empty()
                 st.success(f"✅ Analyzed {len(st.session_state.technical_data)} stocks!")
+                time.sleep(1)
                 st.rerun()
         
         if st.session_state.technical_data:
@@ -611,11 +823,11 @@ with tab3:
             )
         
         with col2:
-            period_options = {"1 Day": 1, "5 Days": 5, "1 Month": 30, "3 Months": 90}
+            period_options = {"1 Week": 7, "2 Weeks": 14, "1 Month": 30, "3 Months": 90}
             period_label = st.selectbox("📅 Period", options=list(period_options.keys()), index=3)
             period_days = period_options[period_label]
         
-        # Interval selection (only for intraday)
+        # Interval selection
         col3, col4 = st.columns(2)
         with col3:
             interval_options = {
@@ -632,154 +844,4 @@ with tab3:
             st.info("ℹ️ Intraday data limited to 5 days. Adjusting period...")
             period_days = 5
         
-        stock_code = STOCK_CODE_MAP.get(selected_chart_stock)
-        
-        if stock_code:
-            with st.spinner(f"Loading data for {selected_chart_stock}..."):
-                df = fetch_stock_data_breeze(stock_code, period_days, interval)
-            
-            if not df.empty and 'Close' in df.columns and len(df) > 0:
-                # Calculate indicators
-                df['RSI'] = calculate_rsi(df['Close'])
-                df['MACD'], df['Signal'] = calculate_macd(df['Close'])
-                
-                current_price = df['Close'].iloc[-1]
-                price_change = df['Close'].iloc[-1] - df['Close'].iloc[0]
-                price_change_pct = (price_change / df['Close'].iloc[0]) * 100
-                
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Current", f"₹{current_price:.2f}")
-                with col2:
-                    st.metric("Change", f"₹{price_change:.2f}", f"{price_change_pct:.2f}%")
-                with col3:
-                    st.metric("High", f"₹{df['High'].max():.2f}")
-                with col4:
-                    st.metric("Low", f"₹{df['Low'].min():.2f}")
-                
-                st.markdown("---")
-                
-                # Candlestick chart
-                if all(col in df.columns for col in ['Open', 'High', 'Low', 'Close']):
-                    fig = go.Figure(data=[go.Candlestick(
-                        x=df.index,
-                        open=df['Open'],
-                        high=df['High'],
-                        low=df['Low'],
-                        close=df['Close']
-                    )])
-                    fig.update_layout(
-                        title=f"{selected_chart_stock} Price Chart ({interval_label})",
-                        xaxis_title="Date",
-                        yaxis_title="Price (₹)",
-                        height=400,
-                        xaxis_rangeslider_visible=False
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                # RSI chart
-                if 'RSI' in df.columns and df['RSI'].notna().any():
-                    fig_rsi = go.Figure()
-                    fig_rsi.add_trace(go.Scatter(x=df.index, y=df['RSI'], name='RSI'))
-                    fig_rsi.add_hline(y=70, line_dash="dash", line_color="red")
-                    fig_rsi.add_hline(y=30, line_dash="dash", line_color="green")
-                    fig_rsi.update_layout(title="RSI", height=250)
-                    st.plotly_chart(fig_rsi, use_container_width=True)
-                
-                # MACD chart
-                if 'MACD' in df.columns and 'Signal' in df.columns:
-                    fig_macd = go.Figure()
-                    fig_macd.add_trace(go.Scatter(x=df.index, y=df['MACD'], name='MACD'))
-                    fig_macd.add_trace(go.Scatter(x=df.index, y=df['Signal'], name='Signal'))
-                    fig_macd.update_layout(title="MACD", height=250)
-                    st.plotly_chart(fig_macd, use_container_width=True)
-            else:
-                st.error(f"⚠️ Could not fetch data for {selected_chart_stock}. Please try another stock or check your Breeze API connection.")
-                st.info("💡 Tip: Make sure the stock code is correct and you have an active Breeze API session.")
-
-# --------------------------
-# TAB 4: MULTI-CHART
-# --------------------------
-with tab4:
-    st.title("📊 Multi-Chart Monitor (Breeze)")
-    st.markdown("Track multiple stocks simultaneously")
-    
-    if not st.session_state.breeze_connected:
-        st.error("⚠️ Breeze API not connected. Please check credentials.")
-    else:
-        st.markdown("---")
-        
-        col1, col2, col3 = st.columns([2, 1, 1])
-        
-        with col1:
-            selected_watchlist = st.multiselect(
-                "Select stocks",
-                options=sorted(FNO_STOCKS[:30]),
-                default=st.session_state.watchlist_stocks[:5],
-                max_selections=6
-            )
-        
-        with col2:
-            period_multi = st.selectbox("Period", ["1 Day", "5 Days", "30 Days"], index=0, key="multi_period")
-            period_map = {"1 Day": 1, "5 Days": 5, "30 Days": 30}
-            days = period_map[period_multi]
-        
-        with col3:
-            if st.button("🔄 Refresh", type="primary", use_container_width=True):
-                st.rerun()
-        
-        if selected_watchlist:
-            num_cols = 2 if len(selected_watchlist) <= 4 else 3
-            num_rows = (len(selected_watchlist) + num_cols - 1) // num_cols
-            
-            for row in range(num_rows):
-                cols = st.columns(num_cols)
-                for col_idx, col in enumerate(cols):
-                    stock_idx = row * num_cols + col_idx
-                    
-                    if stock_idx < len(selected_watchlist):
-                        stock_name = selected_watchlist[stock_idx]
-                        stock_code = STOCK_CODE_MAP.get(stock_name)
-                        
-                        with col:
-                            df = fetch_stock_data_breeze(stock_code, days, "1day")
-                            
-                            if not df.empty and len(df) >= 2 and 'Close' in df.columns:
-                                current = df['Close'].iloc[-1]
-                                prev = df['Close'].iloc[0]
-                                
-                                # Check for valid numbers
-                                if pd.notna(current) and pd.notna(prev) and prev != 0:
-                                    change_pct = ((current - prev) / prev) * 100
-                                    color = "green" if change_pct >= 0 else "red"
-                                    arrow = "🟢" if change_pct >= 0 else "🔴"
-                                    
-                                    st.markdown(f"### {arrow} {stock_name}")
-                                    st.metric("Price", f"₹{current:.2f}", f"{change_pct:.2f}%")
-                                    
-                                    fig = go.Figure()
-                                    fig.add_trace(go.Scatter(
-                                        x=df.index,
-                                        y=df['Close'],
-                                        mode='lines',
-                                        line=dict(color=color, width=2),
-                                        fill='tozeroy'
-                                    ))
-                                    fig.update_layout(
-                                        height=200,
-                                        margin=dict(l=10, r=10, t=10, b=10),
-                                        showlegend=False
-                                    )
-                                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-                                else:
-                                    st.warning(f"⚠️ Invalid data for {stock_name}")
-                            else:
-                                st.warning(f"⚠️ No data for {stock_name}")
-        else:
-            st.info("👆 Select stocks to monitor")
-
-# Footer
-st.markdown("---")
-st.caption("💡 F&O Dashboard powered by ICICI Breeze API")
-st.caption("⚠ **Disclaimer:** For educational purposes only. Not financial advice.")
-st.caption("🔌 **Connection Status:** " + ("✅ Connected" if st.session_state.breeze_connected else "❌ Disconnected"))
+        stock_code =
