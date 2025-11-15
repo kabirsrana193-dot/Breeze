@@ -758,13 +758,19 @@ if st.session_state.breeze_connected:
     st.caption("🔌 **Connection Status:** ✅ Connected to Breeze API")
 else:
     st.caption("🔌 **Connection Status:** ❌ Disconnected - Update credentials to connect")
-    
-    signal_data = generate_signal(stock_code)
-    if signal_data:
-        signal_data['stock'] = stock_name
-        st.session_state.technical_data.append(signal_data)
-        progress_bar.progress((idx + 1) / num_stocks)
-        time.sleep(0.2)  # Rate limiting
+    STOCK_CODE_MAP.get(stock_name)
+                    if not stock_code:
+                        continue
+                    
+                    status_text.text(f"Analyzing {stock_name}... ({idx+1}/{num_stocks})")
+                    
+                    signal_data = generate_signal(stock_code)
+                    if signal_data:
+                        signal_data['stock'] = stock_name
+                        st.session_state.technical_data.append(signal_data)
+                    
+                    progress_bar.progress((idx + 1) / num_stocks)
+                    time.sleep(0.2)  # Rate limiting
                 
                 progress_bar.empty()
                 status_text.empty()
