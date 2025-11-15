@@ -122,15 +122,21 @@ def get_breeze_stock_code(stock_symbol):
     try:
         breeze = st.session_state.breeze_client
         if not breeze:
-            return None
+            return stock_symbol
         
         response = breeze.get_names(exchange="NSE", stock_code=stock_symbol)
         
         if response and 'Success' in response and response['Success']:
-            # Return the short_name which is the Breeze code
-            return response['Success'][0].get('short_name', stock_symbol)
+            # Get the isec_stock_code which is the Breeze-specific code
+            data = response['Success']
+            if isinstance(data, list) and len(data) > 0:
+                return data[0].get('isec_stock_code', stock_symbol)
+            elif isinstance(data, dict):
+                return data.get('isec_stock_code', stock_symbol)
+        
         return stock_symbol
-    except:
+    except Exception as e:
+        # If get_names fails, return original
         return stock_symbol
 
 def subscribe_to_stock(breeze, stock_code):
