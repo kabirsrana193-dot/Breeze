@@ -36,7 +36,7 @@ STOCK_CODE_MAP = {
     "TCS": "TCS",
     "HDFC Bank": "HDFCBK",
     "Infosys": "INFOSYSTCH",
-    "ICICI Bank": "ICIBK",
+    "ICICI Bank": "ICIBAN",
     "ITC": "ITC",
     "Wipro": "WIPRO",
     "Tata Motors": "TATAMOTORS",
