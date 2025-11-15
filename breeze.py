@@ -141,7 +141,7 @@ STOCK_CODE_MAP = {
     "Paytm": "ONE97",
     "LIC": "LIC",
     "SBI Cards": "SBICAR",
-    "Cholamandalam": "CHOINV",
+    "Cholamandalam": "CHOINV",
     "Muthoot Finance": "MUTFIN",
     "Shriram Finance": "SHRTRA",
     "Bosch": "BOSLIM",
