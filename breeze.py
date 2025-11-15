@@ -6,11 +6,13 @@ import time
 import plotly.express as px
 import plotly.graph_objects as go
 from breeze_connect import BreezeConnect
+import threading
+import queue
 
 # Page config
 st.set_page_config(
-    page_title="Nifty F&O Dashboard - Breeze",
-    page_icon="📈",
+    page_title="Live F&O Dashboard - Breeze",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -27,57 +29,41 @@ session_token = "53705299"
 # --------------------------
 FNO_STOCKS = [
     "Reliance", "TCS", "HDFC Bank", "Infosys", "ICICI Bank", "Bharti Airtel", "ITC",
-    "State Bank of India", "SBI", "Hindustan Unilever", "HUL", "Bajaj Finance", 
-    "Kotak Mahindra Bank", "Axis Bank", "Larsen & Toubro", "L&T", "Asian Paints", 
+    "State Bank of India", "Hindustan Unilever", "Bajaj Finance", 
+    "Kotak Mahindra Bank", "Axis Bank", "Larsen & Toubro", "Asian Paints", 
     "Maruti Suzuki", "Titan", "Sun Pharma", "HCL Tech", "Adani Enterprises",
     "Tata Motors", "Wipro", "NTPC", "Bajaj Finserv", "Tata Steel",
-    "Hindalco", "IndusInd Bank", "Mahindra & Mahindra", "M&M", "Coal India",
+    "Hindalco", "IndusInd Bank", "Mahindra & Mahindra", "Coal India",
     "JSW Steel", "Tata Consumer", "Eicher Motors", "BPCL", "Tech Mahindra",
-    "Dr Reddy", "Cipla", "UPL", "Britannia", "Divi's Lab", "SBI Life",
+    "Dr Reddy", "Cipla", "UPL", "Britannia", "Divi's Lab",
     "HDFC Life", "Adani Ports", "ONGC", "IOC", "Vedanta", "Bajaj Auto", 
-    "Hero MotoCorp", "GAIL", "UltraTech", "Zomato", "Trent", "DMart",
-    "Apollo Hospitals", "Lupin", "DLF", "Bank of Baroda", "Canara Bank",
-    "Federal Bank", "InterGlobe Aviation", "Adani Green", "Siemens",
-    "Bharat Electronics", "BEL", "HAL", "Shriram Finance", "IRCTC"
+    "Hero MotoCorp", "GAIL", "UltraTech"
 ]
 
 # Stock code mapping for Breeze API
 STOCK_CODE_MAP = {
     "Reliance": "RELIND", "TCS": "TCS", "HDFC Bank": "HDFCBK",
     "Infosys": "INFY", "ICICI Bank": "ICIBAN", "Bharti Airtel": "BHARTI",
-    "ITC": "ITC", "State Bank of India": "SBIN", "SBI": "SBIN",
-    "Hindustan Unilever": "HINUNL", "HUL": "HINUNL",
-    "Bajaj Finance": "BAJFIN", "Kotak Mahindra Bank": "KOTBAN",
-    "Axis Bank": "AXIBNK", "Larsen & Toubro": "LT", "L&T": "LT",
-    "Asian Paints": "ASIPAI", "Maruti Suzuki": "MARUTI",
-    "Titan": "TITAN", "Sun Pharma": "SUNPHA", "HCL Tech": "HCLTEC",
+    "ITC": "ITC", "State Bank of India": "SBIN",
+    "Hindustan Unilever": "HINUNL", "Bajaj Finance": "BAJFIN", 
+    "Kotak Mahindra Bank": "KOTBAN", "Axis Bank": "AXIBNK", 
+    "Larsen & Toubro": "LT", "Asian Paints": "ASIPAI", 
+    "Maruti Suzuki": "MARUTI", "Titan": "TITAN", 
+    "Sun Pharma": "SUNPHA", "HCL Tech": "HCLTECH",
     "Adani Enterprises": "ADAENT", "Tata Motors": "TATAMO",
     "Wipro": "WIPRO", "NTPC": "NTPC", "Bajaj Finserv": "BAJFNS",
     "Tata Steel": "TATSTE", "Hindalco": "HINDAL",
     "IndusInd Bank": "INDBNK", "Mahindra & Mahindra": "M&M",
-    "M&M": "M&M", "Coal India": "COALIN", "JSW Steel": "JSWSTL",
+    "Coal India": "COALIN", "JSW Steel": "JSWSTL",
     "Tata Consumer": "TATCON", "Eicher Motors": "EICMOT",
     "BPCL": "BPCL", "Tech Mahindra": "TECMAH", "Dr Reddy": "DRREDL",
     "Cipla": "CIPLA", "UPL": "UPL", "Britannia": "BRITAI",
     "Divi's Lab": "DIVLAB", "ONGC": "ONGC", "IOC": "IOC",
-    "Vedanta": "VEDANT", "Bajaj Auto": "BAJAUT", "SBI Life": "SBLIFE",
+    "Vedanta": "VEDANT", "Bajaj Auto": "BAJAUT",
     "HDFC Life": "HDFLIFE", "Adani Ports": "ADANIS",
     "UltraTech": "ULTCEM", "Hero MotoCorp": "HEROMO",
-    "GAIL": "GAIL", "Zomato": "ZOMATO", "Trent": "TRENT",
-    "DMart": "AVEMRT", "Apollo Hospitals": "APOLLOH",
-    "Lupin": "LUPIN", "DLF": "DLF", "Bank of Baroda": "BOBBNK",
-    "Canara Bank": "CANBK", "Federal Bank": "FEDBNK",
-    "InterGlobe Aviation": "INDIGO", "Adani Green": "ADAGRN",
-    "Siemens": "SIEMEN", "Bharat Electronics": "BHAREL", "BEL": "BHAREL",
-    "HAL": "HAL", "Shriram Finance": "SHRFIN", "IRCTC": "IRCTC"
+    "GAIL": "GAIL"
 }
-
-FINANCIAL_RSS_FEEDS = [
-    ("https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms", "ET Markets"),
-    ("https://www.moneycontrol.com/rss/latestnews.xml", "Moneycontrol"),
-]
-
-ARTICLES_PER_REFRESH = 12
 
 # --------------------------
 # Initialize session state
@@ -86,20 +72,16 @@ if 'breeze_client' not in st.session_state:
     st.session_state.breeze_client = None
 if 'breeze_connected' not in st.session_state:
     st.session_state.breeze_connected = False
-if 'news_articles' not in st.session_state:
-    st.session_state.news_articles = []
-if 'selected_stock' not in st.session_state:
-    st.session_state.selected_stock = "All Stocks"
-if 'technical_data' not in st.session_state:
-    st.session_state.technical_data = []
-if 'watchlist_stocks' not in st.session_state:
-    st.session_state.watchlist_stocks = [
-        "Reliance", "TCS", "HDFC Bank", "Infosys", "ICICI Bank"
-    ]
-if 'last_refresh' not in st.session_state:
-    st.session_state.last_refresh = None
-if 'api_call_count' not in st.session_state:
-    st.session_state.api_call_count = 0
+if 'ws_connected' not in st.session_state:
+    st.session_state.ws_connected = False
+if 'live_data' not in st.session_state:
+    st.session_state.live_data = {}
+if 'subscribed_stocks' not in st.session_state:
+    st.session_state.subscribed_stocks = set()
+if 'selected_stocks' not in st.session_state:
+    st.session_state.selected_stocks = ["Reliance", "TCS", "HDFC Bank", "Infosys"]
+if 'data_queue' not in st.session_state:
+    st.session_state.data_queue = queue.Queue()
 
 # --------------------------
 # Breeze Connection
@@ -115,10 +97,141 @@ if not st.session_state.breeze_connected:
         st.session_state.breeze_connected = False
 
 # --------------------------
-# Stock Data Functions
+# WebSocket Functions
+# --------------------------
+def on_ticks(ticks):
+    """Callback function for receiving live ticks"""
+    try:
+        if isinstance(ticks, dict):
+            # Extract stock info from ticks
+            stock_name = ticks.get('stock_name', '')
+            symbol = ticks.get('symbol', '')
+            
+            # Find the display name
+            display_name = None
+            for name, code in STOCK_CODE_MAP.items():
+                if code in stock_name or code in symbol:
+                    display_name = name
+                    break
+            
+            if display_name:
+                st.session_state.live_data[display_name] = {
+                    'ltp': ticks.get('last', 0),
+                    'open': ticks.get('open', 0),
+                    'high': ticks.get('high', 0),
+                    'low': ticks.get('low', 0),
+                    'close': ticks.get('close', 0),
+                    'change': ticks.get('change', 0),
+                    'volume': ticks.get('ttq', 0),
+                    'timestamp': datetime.now().strftime("%H:%M:%S"),
+                    'bid_price': ticks.get('bPrice', 0),
+                    'ask_price': ticks.get('sPrice', 0),
+                    'bid_qty': ticks.get('bQty', 0),
+                    'ask_qty': ticks.get('sQty', 0),
+                }
+    except Exception as e:
+        pass
+
+def subscribe_stock(stock_name):
+    """Subscribe to a stock for live data"""
+    try:
+        breeze = st.session_state.breeze_client
+        if not breeze:
+            return False
+        
+        stock_code = STOCK_CODE_MAP.get(stock_name)
+        if not stock_code:
+            return False
+        
+        # Check if already subscribed
+        if stock_name in st.session_state.subscribed_stocks:
+            return True
+        
+        # Subscribe to live feed
+        response = breeze.subscribe_feeds(
+            exchange_code="NSE",
+            stock_code=stock_code,
+            product_type="cash",
+            get_market_depth=False,
+            get_exchange_quotes=True
+        )
+        
+        if response:
+            st.session_state.subscribed_stocks.add(stock_name)
+            return True
+        
+        return False
+    except Exception as e:
+        st.error(f"Error subscribing to {stock_name}: {str(e)}")
+        return False
+
+def unsubscribe_stock(stock_name):
+    """Unsubscribe from a stock"""
+    try:
+        breeze = st.session_state.breeze_client
+        if not breeze:
+            return False
+        
+        stock_code = STOCK_CODE_MAP.get(stock_name)
+        if not stock_code:
+            return False
+        
+        breeze.unsubscribe_feeds(
+            exchange_code="NSE",
+            stock_code=stock_code,
+            product_type="cash",
+            get_market_depth=False,
+            get_exchange_quotes=True
+        )
+        
+        if stock_name in st.session_state.subscribed_stocks:
+            st.session_state.subscribed_stocks.remove(stock_name)
+        
+        if stock_name in st.session_state.live_data:
+            del st.session_state.live_data[stock_name]
+        
+        return True
+    except Exception as e:
+        st.error(f"Error unsubscribing from {stock_name}: {str(e)}")
+        return False
+
+def start_websocket():
+    """Start WebSocket connection"""
+    try:
+        breeze = st.session_state.breeze_client
+        if not breeze:
+            return False
+        
+        # Assign callback
+        breeze.on_ticks = on_ticks
+        
+        # Connect to websocket
+        breeze.ws_connect()
+        st.session_state.ws_connected = True
+        return True
+    except Exception as e:
+        st.error(f"WebSocket connection error: {str(e)}")
+        return False
+
+def stop_websocket():
+    """Stop WebSocket connection"""
+    try:
+        breeze = st.session_state.breeze_client
+        if breeze and st.session_state.ws_connected:
+            breeze.ws_disconnect()
+            st.session_state.ws_connected = False
+            st.session_state.subscribed_stocks.clear()
+            st.session_state.live_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"Error disconnecting WebSocket: {str(e)}")
+        return False
+
+# --------------------------
+# Historical Data Functions
 # --------------------------
 @st.cache_data(ttl=300)
-def fetch_stock_data_breeze(stock_code, days=90, interval="1day"):
+def fetch_stock_data_breeze(stock_code, days=7, interval="1day"):
     """Fetch historical stock data using Breeze API"""
     try:
         breeze = st.session_state.breeze_client
@@ -128,7 +241,6 @@ def fetch_stock_data_breeze(stock_code, days=90, interval="1day"):
         to_date = datetime.now()
         from_date = to_date - timedelta(days=days)
         
-        # Breeze API requires ISO 8601 format with .000Z
         from_date_str = from_date.strftime("%Y-%m-%d") + "T07:00:00.000Z"
         to_date_str = to_date.strftime("%Y-%m-%d") + "T23:59:59.000Z"
         
@@ -141,8 +253,6 @@ def fetch_stock_data_breeze(stock_code, days=90, interval="1day"):
             product_type="cash"
         )
         
-        # Rate limiting: 100 calls/min = 0.6s minimum between calls
-        st.session_state.api_call_count += 1
         time.sleep(0.7)
         
         if response and 'Success' in response:
@@ -150,7 +260,6 @@ def fetch_stock_data_breeze(stock_code, days=90, interval="1day"):
             if data and len(data) > 0:
                 df = pd.DataFrame(data)
                 
-                # Map column names - Breeze uses 'datetime' not 'date'
                 column_mapping = {}
                 for col in df.columns:
                     col_lower = col.lower()
@@ -175,7 +284,6 @@ def fetch_stock_data_breeze(stock_code, days=90, interval="1day"):
                     df = df.set_index('Date')
                     df = df.sort_index()
                     
-                    # Convert to numeric
                     numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
                     for col in numeric_cols:
                         if col in df.columns:
@@ -193,558 +301,180 @@ def fetch_stock_data_breeze(stock_code, days=90, interval="1day"):
         
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"Error fetching data for {stock_code}: {str(e)}")
         return pd.DataFrame()
-
-# --------------------------
-# Technical Analysis Functions
-# --------------------------
-def calculate_rsi(data, period=14):
-    """Calculate RSI indicator"""
-    try:
-        delta = data.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / loss.replace(0, 0.0001)
-        rsi = 100 - (100 / (1 + rs))
-        return rsi
-    except:
-        return pd.Series(index=data.index)
-
-def calculate_macd(data, fast=12, slow=26, signal=9):
-    """Calculate MACD indicator"""
-    try:
-        exp1 = data.ewm(span=fast, adjust=False).mean()
-        exp2 = data.ewm(span=slow, adjust=False).mean()
-        macd = exp1 - exp2
-        signal_line = macd.ewm(span=signal, adjust=False).mean()
-        return macd, signal_line
-    except:
-        return pd.Series(index=data.index), pd.Series(index=data.index)
-
-def generate_signal(stock_code):
-    """Generate buy/sell signal"""
-    try:
-        df = fetch_stock_data_breeze(stock_code, 90, "1day")
-        
-        if df.empty or len(df) < 50:
-            return None
-        
-        df['RSI'] = calculate_rsi(df['Close'])
-        df['MACD'], df['Signal'] = calculate_macd(df['Close'])
-        
-        df_clean = df.dropna(subset=['Close', 'RSI', 'MACD', 'Signal'])
-        if df_clean.empty:
-            return None
-        
-        current_price = df_clean['Close'].iloc[-1]
-        rsi = df_clean['RSI'].iloc[-1]
-        macd = df_clean['MACD'].iloc[-1]
-        signal_line = df_clean['Signal'].iloc[-1]
-        
-        score = 0
-        signals = []
-        
-        if pd.notna(rsi):
-            if rsi < 30:
-                signals.append("RSI Oversold")
-                score += 2
-            elif rsi > 70:
-                signals.append("RSI Overbought")
-                score -= 2
-        
-        if pd.notna(macd) and pd.notna(signal_line):
-            if macd > signal_line:
-                signals.append("MACD Bullish")
-                score += 1
-            else:
-                signals.append("MACD Bearish")
-                score -= 1
-        
-        if score >= 2:
-            recommendation = "🟢 STRONG BUY"
-        elif score >= 1:
-            recommendation = "🟡 BUY"
-        elif score <= -2:
-            recommendation = "🔴 STRONG SELL"
-        elif score <= -1:
-            recommendation = "🟠 SELL"
-        else:
-            recommendation = "⚪ HOLD"
-        
-        return {
-            'price': current_price,
-            'rsi': rsi,
-            'macd': macd,
-            'signals': ', '.join(signals) if signals else 'No signals',
-            'recommendation': recommendation,
-            'score': score
-        }
-    except Exception as e:
-        st.error(f"Error generating signal for {stock_code}: {str(e)}")
-        return None
-
-# --------------------------
-# Sentiment Analysis
-# --------------------------
-def analyze_sentiment(text):
-    """Fast keyword-based sentiment analysis"""
-    POSITIVE = ['surge', 'rally', 'gain', 'profit', 'growth', 'rise', 'bullish', 
-                'strong', 'beats', 'outperform', 'jumps', 'soars', 'upgrade', 
-                'breakthrough', 'record', 'momentum', 'recovery']
-    
-    NEGATIVE = ['fall', 'drop', 'loss', 'decline', 'weak', 'crash', 'bearish',
-                'concern', 'risk', 'plunge', 'slump', 'miss', 'downgrade', 
-                'warning', 'crisis', 'tumbles', 'worst']
-    
-    text_lower = text.lower()
-    pos_count = sum(1 for w in POSITIVE if w in text_lower)
-    neg_count = sum(1 for w in NEGATIVE if w in text_lower)
-    
-    if pos_count > neg_count:
-        return "positive", min(0.6 + pos_count * 0.1, 0.95)
-    elif neg_count > pos_count:
-        return "negative", min(0.6 + neg_count * 0.1, 0.95)
-    else:
-        return "neutral", 0.5
-
-# --------------------------
-# News Functions
-# --------------------------
-def fetch_news(num_articles=12, specific_stock=None):
-    """Fetch news articles"""
-    all_articles = []
-    seen_titles = set()
-    
-    for feed_url, source_name in FINANCIAL_RSS_FEEDS:
-        try:
-            feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:15]:
-                title = getattr(entry, 'title', '')
-                if not title or title in seen_titles:
-                    continue
-                
-                if specific_stock and specific_stock != "All Stocks":
-                    if specific_stock.upper() not in title.upper():
-                        continue
-                
-                sentiment, score = analyze_sentiment(title)
-                
-                all_articles.append({
-                    "Title": title,
-                    "Source": source_name,
-                    "Sentiment": sentiment,
-                    "Score": score,
-                    "Link": entry.link,
-                    "Published": getattr(entry, 'published', 'Recent')
-                })
-                seen_titles.add(title)
-                
-                if len(all_articles) >= num_articles:
-                    break
-        except:
-            continue
-        
-        if len(all_articles) >= num_articles:
-            break
-    
-    return all_articles[:num_articles]
 
 # --------------------------
 # Streamlit App
 # --------------------------
 
-# API Call Counter Warning
-if st.session_state.api_call_count > 4500:
-    st.warning(f"⚠️ API calls today: {st.session_state.api_call_count}/5000. Approaching daily limit!")
+st.title("📊 Live F&O Dashboard - Real-Time WebSocket Data")
+st.markdown("**Real-time streaming quotes powered by ICICI Breeze WebSocket API**")
 
-# Main tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📰 News", "📈 Technical", "💹 Charts", "📊 Multi-Chart"])
-
-# TAB 1: NEWS
-with tab1:
-    st.title("📈 F&O News Dashboard (Breeze API)")
-    st.markdown(f"Track {len(FNO_STOCKS)} F&O stocks | Powered by ICICI Breeze")
-    st.markdown("---")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        stock_options = ["All Stocks"] + sorted(FNO_STOCKS[:30])
-        selected_stock = st.selectbox(
-            "🔍 Filter by Stock",
-            options=stock_options,
-            index=stock_options.index(st.session_state.selected_stock),
-            key="stock_filter"
-        )
-        st.session_state.selected_stock = selected_stock
-
-    with col2:
-        if st.button("🔄 Refresh News", type="primary", use_container_width=True, key="refresh_news_btn"):
-            with st.spinner("Fetching updates..."):
-                new_articles = fetch_news(ARTICLES_PER_REFRESH, st.session_state.selected_stock)
-                st.session_state.news_articles = new_articles
-                st.session_state.last_refresh = datetime.now()
-                st.success(f"✅ Loaded {len(new_articles)} articles!")
-
-    with col3:
-        if st.button("🗑 Clear", use_container_width=True, key="clear_news_btn"):
-            st.session_state.news_articles = []
-
-    if not st.session_state.news_articles:
-        with st.spinner("Loading news..."):
-            st.session_state.news_articles = fetch_news(ARTICLES_PER_REFRESH, st.session_state.selected_stock)
-            st.session_state.last_refresh = datetime.now()
-
-    if st.session_state.news_articles:
-        df_all = pd.DataFrame(st.session_state.news_articles)
-        
-        st.subheader("📊 Sentiment Overview")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total", len(df_all))
-        with col2:
-            st.metric("🟢 Positive", len(df_all[df_all['Sentiment'] == 'positive']))
-        with col3:
-            st.metric("⚪ Neutral", len(df_all[df_all['Sentiment'] == 'neutral']))
-        with col4:
-            st.metric("🔴 Negative", len(df_all[df_all['Sentiment'] == 'negative']))
-        
-        st.markdown("---")
-        
-        sentiment_counts = df_all['Sentiment'].value_counts().reset_index()
-        sentiment_counts.columns = ["Sentiment", "Count"]
-        
-        fig = px.bar(
-            sentiment_counts,
-            x="Sentiment",
-            y="Count",
-            color="Sentiment",
-            color_discrete_map={"positive": "green", "neutral": "gray", "negative": "red"},
-            title="Sentiment Distribution"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.markdown("---")
-        st.subheader("📰 Latest Articles")
-        
-        for article in st.session_state.news_articles:
-            sentiment_colors = {"positive": "#28a745", "neutral": "#6c757d", "negative": "#dc3545"}
-            sentiment_emoji = {"positive": "🟢", "neutral": "⚪", "negative": "🔴"}
-            
-            st.markdown(f"**[{article['Title']}]({article['Link']})**")
-            st.markdown(
-                f"<span style='background-color: {sentiment_colors[article['Sentiment']]}; "
-                f"color: white; padding: 3px 10px; border-radius: 4px; font-size: 11px;'>"
-                f"{sentiment_emoji[article['Sentiment']]} {article['Sentiment'].upper()} "
-                f"({article['Score']:.2f})</span>",
-                unsafe_allow_html=True
-            )
-            st.caption(f"Source: {article['Source']} | {article['Published']}")
-            st.markdown("---")
+# Connection Status
+col1, col2, col3 = st.columns(3)
+with col1:
+    if st.session_state.breeze_connected:
+        st.success("✅ API Connected")
     else:
-        st.info("No articles found. Click 'Refresh News' to load.")
+        st.error("❌ API Disconnected")
 
-# TAB 2: TECHNICAL ANALYSIS
-with tab2:
-    st.title("📈 Technical Analysis (Breeze)")
-    st.markdown("Buy/Sell signals based on RSI & MACD")
-    
-    if not st.session_state.breeze_connected:
-        st.error("⚠️ Breeze API not connected. Please check credentials.")
+with col2:
+    if st.session_state.ws_connected:
+        st.success(f"✅ WebSocket Active ({len(st.session_state.subscribed_stocks)} stocks)")
     else:
-        st.markdown("---")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            num_stocks = st.selectbox(
-                "📊 Stocks to Analyze",
-                options=[5, 10, 15, 20],
-                index=1,
-                key="num_stocks_select"
-            )
-        
-        with col2:
-            if st.button("🔄 Run Analysis", type="primary", use_container_width=True, key="run_analysis_btn"):
-                st.session_state.technical_data = []
-                
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                stocks_to_analyze = FNO_STOCKS[:num_stocks]
-                
-                for idx, stock_name in enumerate(stocks_to_analyze):
-                    stock_code = STOCK_CODE_MAP.get(stock_name)
-                    if not stock_code:
-                        continue
-                    
-                    status_text.text(f"Analyzing {stock_name}... ({idx+1}/{num_stocks})")
-                    
-                    signal_data = generate_signal(stock_code)
-                    if signal_data:
-                        signal_data['stock'] = stock_name
-                        st.session_state.technical_data.append(signal_data)
-                    
-                    progress_bar.progress((idx + 1) / num_stocks)
-                
-                progress_bar.empty()
-                status_text.empty()
-                st.success(f"✅ Analyzed {len(st.session_state.technical_data)} stocks!")
-        
-        if st.session_state.technical_data:
-            df_tech = pd.DataFrame(st.session_state.technical_data)
+        st.warning("⚪ WebSocket Inactive")
+
+with col3:
+    if st.session_state.ws_connected:
+        if st.button("🔴 Stop Live Data", type="secondary", use_container_width=True):
+            stop_websocket()
+            st.rerun()
+    else:
+        if st.button("🟢 Start Live Data", type="primary", use_container_width=True):
+            if start_websocket():
+                st.success("WebSocket connected!")
+                time.sleep(1)
+                st.rerun()
+
+st.markdown("---")
+
+# Stock Selection
+st.subheader("📈 Select Stocks to Monitor")
+
+col1, col2 = st.columns([3, 1])
+
+with col1:
+    selected_stocks = st.multiselect(
+        "Choose up to 6 stocks for live monitoring",
+        options=sorted(FNO_STOCKS),
+        default=st.session_state.selected_stocks,
+        max_selections=6,
+        key="stock_selector"
+    )
+
+with col2:
+    if st.button("🔄 Update Subscriptions", type="primary", use_container_width=True):
+        if st.session_state.ws_connected:
+            # Unsubscribe from removed stocks
+            for stock in st.session_state.subscribed_stocks.copy():
+                if stock not in selected_stocks:
+                    unsubscribe_stock(stock)
             
-            st.subheader("📊 Signal Summary")
-            col1, col2, col3, col4 = st.columns(4)
+            # Subscribe to new stocks
+            for stock in selected_stocks:
+                if stock not in st.session_state.subscribed_stocks:
+                    subscribe_stock(stock)
             
-            with col1:
-                st.metric("🟢 Strong Buy", len(df_tech[df_tech['recommendation'] == '🟢 STRONG BUY']))
-            with col2:
-                st.metric("🟡 Buy", len(df_tech[df_tech['recommendation'] == '🟡 BUY']))
-            with col3:
-                st.metric("🟠 Sell", len(df_tech[df_tech['recommendation'] == '🟠 SELL']))
-            with col4:
-                st.metric("🔴 Strong Sell", len(df_tech[df_tech['recommendation'] == '🔴 STRONG SELL']))
-            
-            st.markdown("---")
-            
-            df_tech = df_tech.sort_values('score', ascending=False)
-            
-            for _, row in df_tech.iterrows():
-                with st.expander(f"{row['recommendation']} - {row['stock']} @ ₹{row['price']:.2f}"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown(f"**Price:** ₹{row['price']:.2f}")
-                        st.markdown(f"**RSI:** {row['rsi']:.2f}")
-                    with col2:
-                        st.markdown(f"**MACD:** {row['macd']:.4f}")
-                        st.markdown(f"**Score:** {row['score']}")
-                    st.markdown(f"**Signals:** {row['signals']}")
+            st.session_state.selected_stocks = selected_stocks
+            st.success(f"Subscribed to {len(selected_stocks)} stocks!")
+            time.sleep(1)
+            st.rerun()
         else:
-            st.info("👆 Click 'Run Analysis' to generate signals")
+            st.warning("⚠️ Please start WebSocket connection first!")
 
-# TAB 3: STOCK CHARTS
-with tab3:
-    st.title("💹 Stock Charts (Breeze)")
-    st.markdown("Candlestick charts with technical indicators")
+st.markdown("---")
+
+# Display Live Data
+if st.session_state.ws_connected and selected_stocks:
+    st.subheader("📊 Live Market Data")
     
-    if not st.session_state.breeze_connected:
-        st.error("⚠️ Breeze API not connected.")
-    else:
-        st.markdown("---")
+    # Auto-refresh placeholder
+    placeholder = st.empty()
+    
+    # Create grid layout
+    num_cols = 2 if len(selected_stocks) <= 4 else 3
+    
+    with placeholder.container():
+        rows = (len(selected_stocks) + num_cols - 1) // num_cols
         
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            selected_chart_stock = st.selectbox(
-                "📊 Select Stock",
-                options=sorted(FNO_STOCKS[:30]),
-                key="chart_stock"
-            )
-        
-        with col2:
-            period_options = {"1 Week": 7, "2 Weeks": 14, "1 Month": 30, "3 Months": 90}
-            period_label = st.selectbox("📅 Period", options=list(period_options.keys()), index=3, key="chart_period")
-            period_days = period_options[period_label]
-        
-        col3, col4 = st.columns(2)
-        with col3:
-            interval_options = {
-                "Daily": "1day",
-                "30 Minutes": "30minute", 
-                "5 Minutes": "5minute",
-                "1 Minute": "1minute"
-            }
-            interval_label = st.selectbox("⏱️ Interval", options=list(interval_options.keys()), index=0, key="chart_interval")
-            interval = interval_options[interval_label]
-        
-        if interval != "1day" and period_days > 5:
-            st.info("ℹ️ Intraday data limited to 5 days.")
-            period_days = 5
-        
-        stock_code = STOCK_CODE_MAP.get(selected_chart_stock)
-        
-        if stock_code:
-            with st.spinner(f"Loading data for {selected_chart_stock}..."):
-                df = fetch_stock_data_breeze(stock_code, period_days, interval)
+        for row in range(rows):
+            cols = st.columns(num_cols)
             
-            if not df.empty and 'Close' in df.columns and len(df) > 0:
-                df['RSI'] = calculate_rsi(df['Close'])
-                df['MACD'], df['Signal'] = calculate_macd(df['Close'])
-                df_clean = df.dropna(subset=['Close'])
+            for col_idx in range(num_cols):
+                stock_idx = row * num_cols + col_idx
                 
-                if len(df_clean) >= 2:
-                    current_price = df_clean['Close'].iloc[-1]
-                    price_change = df_clean['Close'].iloc[-1] - df_clean['Close'].iloc[0]
-                    price_change_pct = (price_change / df_clean['Close'].iloc[0]) * 100
+                if stock_idx < len(selected_stocks):
+                    stock_name = selected_stocks[stock_idx]
                     
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Current", f"₹{current_price:.2f}")
-                    with col2:
-                        st.metric("Change", f"₹{price_change:.2f}", f"{price_change_pct:.2f}%")
-                    with col3:
-                        st.metric("High", f"₹{df_clean['High'].max():.2f}" if 'High' in df_clean.columns else "N/A")
-                    with col4:
-                        st.metric("Low", f"₹{df_clean['Low'].min():.2f}" if 'Low' in df_clean.columns else "N/A")
-                    
-                    st.markdown("---")
-                    
-                    if all(col in df_clean.columns for col in ['Open', 'High', 'Low', 'Close']):
-                        fig = go.Figure(data=[go.Candlestick(
-                            x=df_clean.index,
-                            open=df_clean['Open'],
-                            high=df_clean['High'],
-                            low=df_clean['Low'],
-                            close=df_clean['Close']
-                        )])
-                        fig.update_layout(
-                            title=f"{selected_chart_stock} Price Chart ({interval_label})",
-                            xaxis_title="Date",
-                            yaxis_title="Price (₹)",
-                            height=400,
-                            xaxis_rangeslider_visible=False
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(x=df_clean.index, y=df_clean['Close'], mode='lines', name='Close'))
-                        fig.update_layout(
-                            title=f"{selected_chart_stock} Price Chart ({interval_label})",
-                            xaxis_title="Date",
-                            yaxis_title="Price (₹)",
-                            height=400
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    df_rsi = df_clean.dropna(subset=['RSI'])
-                    if len(df_rsi) > 0:
-                        fig_rsi = go.Figure()
-                        fig_rsi.add_trace(go.Scatter(x=df_rsi.index, y=df_rsi['RSI'], name='RSI'))
-                        fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought")
-                        fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold")
-                        fig_rsi.update_layout(title="RSI Indicator", height=250, yaxis_range=[0, 100])
-                        st.plotly_chart(fig_rsi, use_container_width=True)
-                    
-                    df_macd = df_clean.dropna(subset=['MACD', 'Signal'])
-                    if len(df_macd) > 0:
-                        fig_macd = go.Figure()
-                        fig_macd.add_trace(go.Scatter(x=df_macd.index, y=df_macd['MACD'], name='MACD', line=dict(color='blue')))
-                        fig_macd.add_trace(go.Scatter(x=df_macd.index, y=df_macd['Signal'], name='Signal', line=dict(color='red')))
-                        fig_macd.update_layout(title="MACD Indicator", height=250)
-                        st.plotly_chart(fig_macd, use_container_width=True)
-                else:
-                    st.warning(f"⚠️ Insufficient data for {selected_chart_stock}")
-            else:
-                st.error(f"⚠️ Could not fetch data for {selected_chart_stock}")
-                st.info("💡 Try a different stock or check your Breeze API connection.")
-        else:
-            st.error(f"⚠️ Stock code not found for {selected_chart_stock}")
-
-# TAB 4: MULTI-CHART
-with tab4:
-    st.title("📊 Multi-Chart Monitor (Breeze)")
-    st.markdown("Track multiple stocks simultaneously")
-    
-    if not st.session_state.breeze_connected:
-        st.error("⚠️ Breeze API not connected.")
-    else:
-        st.markdown("---")
-        
-        col1, col2, col3 = st.columns([2, 1, 1])
-        
-        with col1:
-            selected_watchlist = st.multiselect(
-                "Select stocks",
-                options=sorted(FNO_STOCKS[:30]),
-                default=st.session_state.watchlist_stocks[:5],
-                max_selections=6,
-                key="multi_watchlist"
-            )
-        
-        with col2:
-            period_multi = st.selectbox("Period", ["1 Week", "2 Weeks", "1 Month"], index=0, key="multi_period")
-            period_map = {"1 Week": 7, "2 Weeks": 14, "1 Month": 30}
-            days = period_map[period_multi]
-        
-        with col3:
-            if st.button("🔄 Refresh", type="primary", use_container_width=True, key="multi_refresh_btn"):
-                st.cache_data.clear()
-        
-        if selected_watchlist:
-            num_cols = 2 if len(selected_watchlist) <= 4 else 3
-            num_rows = (len(selected_watchlist) + num_cols - 1) // num_cols
-            
-            for row in range(num_rows):
-                cols = st.columns(num_cols)
-                for col_idx, col in enumerate(cols):
-                    stock_idx = row * num_cols + col_idx
-                    
-                    if stock_idx < len(selected_watchlist):
-                        stock_name = selected_watchlist[stock_idx]
-                        stock_code = STOCK_CODE_MAP.get(stock_name)
+                    with cols[col_idx]:
+                        # Get live data
+                        live_data = st.session_state.live_data.get(stock_name, {})
                         
-                        with col:
+                        if live_data:
+                            ltp = live_data.get('ltp', 0)
+                            change = live_data.get('change', 0)
+                            open_price = live_data.get('open', 0)
+                            high = live_data.get('high', 0)
+                            low = live_data.get('low', 0)
+                            volume = live_data.get('volume', 0)
+                            timestamp = live_data.get('timestamp', '')
+                            bid_price = live_data.get('bid_price', 0)
+                            ask_price = live_data.get('ask_price', 0)
+                            
+                            # Card styling
+                            color = "green" if change >= 0 else "red"
+                            arrow = "🟢" if change >= 0 else "🔴"
+                            
+                            st.markdown(f"### {arrow} **{stock_name}**")
+                            st.metric(
+                                "Live Price (LTP)",
+                                f"₹{ltp:.2f}",
+                                f"{change:.2f}%"
+                            )
+                            
+                            # Additional details
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.caption(f"**Open:** ₹{open_price:.2f}")
+                                st.caption(f"**High:** ₹{high:.2f}")
+                                st.caption(f"**Low:** ₹{low:.2f}")
+                            with col_b:
+                                st.caption(f"**Bid:** ₹{bid_price:.2f}")
+                                st.caption(f"**Ask:** ₹{ask_price:.2f}")
+                                st.caption(f"**Volume:** {volume:,}")
+                            
+                            st.caption(f"🕐 Last updated: {timestamp}")
+                            
+                            # Mini chart
+                            stock_code = STOCK_CODE_MAP.get(stock_name)
                             if stock_code:
-                                df = fetch_stock_data_breeze(stock_code, days, "1day")
-                                
-                                if not df.empty and len(df) >= 2 and 'Close' in df.columns:
-                                    df_clean = df.dropna(subset=['Close'])
-                                    
-                                    if len(df_clean) >= 2:
-                                        current = df_clean['Close'].iloc[-1]
-                                        prev = df_clean['Close'].iloc[0]
-                                        
-                                        if pd.notna(current) and pd.notna(prev) and prev != 0:
-                                            change = current - prev
-                                            change_pct = (change / prev) * 100
-                                            color = "green" if change_pct >= 0 else "red"
-                                            arrow = "🟢" if change_pct >= 0 else "🔴"
-                                            
-                                            st.markdown(f"### {arrow} {stock_name}")
-                                            st.metric(
-                                                "Price", 
-                                                f"₹{current:.2f}", 
-                                                f"{change:.2f} ({change_pct:.2f}%)"
-                                            )
-                                            
-                                            fig = go.Figure()
-                                            fig.add_trace(go.Scatter(
-                                                x=df_clean.index,
-                                                y=df_clean['Close'],
-                                                mode='lines',
-                                                line=dict(color=color, width=2),
-                                                fill='tozeroy',
-                                                fillcolor=f'rgba({"0,255,0" if color == "green" else "255,0,0"},0.1)'
-                                            ))
-                                            fig.update_layout(
-                                                height=200,
-                                                margin=dict(l=10, r=10, t=10, b=10),
-                                                showlegend=False,
-                                                xaxis=dict(showgrid=False),
-                                                yaxis=dict(showgrid=True, gridcolor='lightgray')
-                                            )
-                                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-                                        else:
-                                            st.warning(f"⚠️ Invalid data for {stock_name}")
-                                    else:
-                                        st.warning(f"⚠️ Insufficient data for {stock_name}")
-                                else:
-                                    st.warning(f"⚠️ No data available for {stock_name}")
-                            else:
-                                st.error(f"⚠️ Stock code not found for {stock_name}")
-        else:
-            st.info("👆 Select stocks from the dropdown to monitor")
+                                df = fetch_stock_data_breeze(stock_code, days=7)
+                                if not df.empty and 'Close' in df.columns:
+                                    fig = go.Figure()
+                                    fig.add_trace(go.Scatter(
+                                        x=df.index,
+                                        y=df['Close'],
+                                        mode='lines',
+                                        line=dict(color=color, width=2),
+                                        fill='tozeroy',
+                                        fillcolor=f'rgba({"0,255,0" if color == "green" else "255,0,0"},0.1)'
+                                    ))
+                                    fig.update_layout(
+                                        height=150,
+                                        margin=dict(l=0, r=0, t=0, b=0),
+                                        showlegend=False,
+                                        xaxis=dict(showgrid=False, showticklabels=False),
+                                        yaxis=dict(showgrid=False, showticklabels=False)
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                        else:
+                            st.markdown(f"### ⏳ **{stock_name}**")
+                            st.info("Waiting for live data...")
+                            st.caption("Make sure to click 'Update Subscriptions'")
+    
+    # Auto-refresh every 2 seconds
+    st.markdown("---")
+    st.caption("🔄 Dashboard auto-refreshes every 2 seconds")
+    time.sleep(2)
+    st.rerun()
+
+elif not st.session_state.ws_connected:
+    st.info("👆 Click **'Start Live Data'** to begin receiving real-time quotes")
+else:
+    st.info("👆 Select stocks from the dropdown and click **'Update Subscriptions'**")
 
 # Footer
 st.markdown("---")
-st.caption("💡 F&O Dashboard powered by ICICI Breeze API")
+st.caption("💡 Live streaming dashboard powered by ICICI Breeze WebSocket API")
 st.caption("⚠ **Disclaimer:** For educational purposes only. Not financial advice.")
-
-# Connection status
-if st.session_state.breeze_connected:
-    st.caption(f"🔌 **Connection Status:** ✅ Connected to Breeze API | API Calls: {st.session_state.api_call_count}/5000")
-else:
-    st.caption("🔌 **Connection Status:** ❌ Disconnected - Check your credentials")
+st.caption(f"📡 Subscribed Stocks: {', '.join(st.session_state.subscribed_stocks) if st.session_state.subscribed_stocks else 'None'}")
