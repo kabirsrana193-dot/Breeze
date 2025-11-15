@@ -100,6 +100,8 @@ if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = None
 if 'subscribed_stocks' not in st.session_state:
     st.session_state.subscribed_stocks = set()
+if 'refresh_trigger' not in st.session_state:
+    st.session_state.refresh_trigger = 0
 
 # --------------------------
 # Breeze Connection
@@ -393,19 +395,16 @@ with tab1:
         st.session_state.selected_stock = selected_stock
 
     with col2:
-        if st.button("🔄 Refresh News", type="primary", use_container_width=True):
+        if st.button("🔄 Refresh News", type="primary", use_container_width=True, key="refresh_news_btn"):
             with st.spinner("Fetching updates..."):
                 new_articles = fetch_news(ARTICLES_PER_REFRESH, st.session_state.selected_stock)
                 st.session_state.news_articles = new_articles
                 st.session_state.last_refresh = datetime.now()
                 st.success(f"✅ Loaded {len(new_articles)} articles!")
-                time.sleep(0.5)
-                st.rerun()
 
     with col3:
-        if st.button("🗑 Clear", use_container_width=True):
+        if st.button("🗑 Clear", use_container_width=True, key="clear_news_btn"):
             st.session_state.news_articles = []
-            st.rerun()
 
     if not st.session_state.news_articles:
         with st.spinner("Loading news..."):
@@ -478,11 +477,12 @@ with tab2:
             num_stocks = st.selectbox(
                 "📊 Stocks to Analyze",
                 options=[5, 10, 15, 20],
-                index=1
+                index=1,
+                key="num_stocks_select"
             )
         
         with col2:
-            if st.button("🔄 Run Analysis", type="primary", use_container_width=True):
+            if st.button("🔄 Run Analysis", type="primary", use_container_width=True, key="run_analysis_btn"):
                 st.session_state.technical_data = []
                 
                 progress_bar = st.progress(0)
@@ -508,8 +508,6 @@ with tab2:
                 progress_bar.empty()
                 status_text.empty()
                 st.success(f"✅ Analyzed {len(st.session_state.technical_data)} stocks!")
-                time.sleep(1)
-                st.rerun()
         
         if st.session_state.technical_data:
             df_tech = pd.DataFrame(st.session_state.technical_data)
@@ -564,7 +562,7 @@ with tab3:
         
         with col2:
             period_options = {"1 Week": 7, "2 Weeks": 14, "1 Month": 30, "3 Months": 90}
-            period_label = st.selectbox("📅 Period", options=list(period_options.keys()), index=3)
+            period_label = st.selectbox("📅 Period", options=list(period_options.keys()), index=3, key="chart_period")
             period_days = period_options[period_label]
         
         col3, col4 = st.columns(2)
@@ -575,7 +573,7 @@ with tab3:
                 "5 Minutes": "5minute",
                 "1 Minute": "1minute"
             }
-            interval_label = st.selectbox("⏱️ Interval", options=list(interval_options.keys()), index=0)
+            interval_label = st.selectbox("⏱️ Interval", options=list(interval_options.keys()), index=0, key="chart_interval")
             interval = interval_options[interval_label]
         
         if interval != "1day" and period_days > 5:
@@ -678,7 +676,8 @@ with tab4:
                 "Select stocks",
                 options=sorted(FNO_STOCKS[:30]),
                 default=st.session_state.watchlist_stocks[:5],
-                max_selections=6
+                max_selections=6,
+                key="multi_watchlist"
             )
         
         with col2:
@@ -687,9 +686,8 @@ with tab4:
             days = period_map[period_multi]
         
         with col3:
-            if st.button("🔄 Refresh", type="primary", use_container_width=True):
+            if st.button("🔄 Refresh", type="primary", use_container_width=True, key="multi_refresh_btn"):
                 st.cache_data.clear()
-                st.rerun()
         
         if selected_watchlist:
             num_cols = 2 if len(selected_watchlist) <= 4 else 3
