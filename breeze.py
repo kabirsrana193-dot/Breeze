@@ -327,6 +327,58 @@ def calculate_macd(data, fast=12, slow=26, signal=9):
     histogram = macd - signal_line
     return macd, signal_line, histogram
 
+def calculate_bollinger_bands(data, period=20, std_dev=2):
+    """Calculate Bollinger Bands"""
+    sma = data.rolling(window=period).mean()
+    std = data.rolling(window=period).std()
+    upper_band = sma + (std * std_dev)
+    lower_band = sma - (std * std_dev)
+    return upper_band, sma, lower_band
+
+def calculate_supertrend(df, period=10, multiplier=3):
+    """Calculate Supertrend"""
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    
+    # Calculate ATR
+    tr1 = high - low
+    tr2 = abs(high - close.shift())
+    tr3 = abs(low - close.shift())
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+    
+    # Calculate basic upper and lower bands
+    hl_avg = (high + low) / 2
+    upper_band = hl_avg + (multiplier * atr)
+    lower_band = hl_avg - (multiplier * atr)
+    
+    # Initialize supertrend
+    supertrend = pd.Series(index=df.index, dtype=float)
+    direction = pd.Series(index=df.index, dtype=float)
+    
+    for i in range(period, len(df)):
+        if i == period:
+            supertrend.iloc[i] = lower_band.iloc[i]
+            direction.iloc[i] = 1
+        else:
+            if close.iloc[i] > supertrend.iloc[i-1]:
+                supertrend.iloc[i] = lower_band.iloc[i]
+                direction.iloc[i] = 1
+            elif close.iloc[i] < supertrend.iloc[i-1]:
+                supertrend.iloc[i] = upper_band.iloc[i]
+                direction.iloc[i] = -1
+            else:
+                supertrend.iloc[i] = supertrend.iloc[i-1]
+                direction.iloc[i] = direction.iloc[i-1]
+                
+            if direction.iloc[i] == 1 and supertrend.iloc[i] < supertrend.iloc[i-1]:
+                supertrend.iloc[i] = supertrend.iloc[i-1]
+            if direction.iloc[i] == -1 and supertrend.iloc[i] > supertrend.iloc[i-1]:
+                supertrend.iloc[i] = supertrend.iloc[i-1]
+    
+    return supertrend, direction
+
 # --------------------------
 # Sentiment Analysis
 # --------------------------
@@ -465,7 +517,7 @@ with tab1:
 # TAB 2: CHARTS - FIXED DATE LABELS
 with tab2:
     st.header("Stock Charts with Technical Indicators")
-    st.caption("📊 EMA: 9, 21, 50 | SMA: 20, 50, 200 | Market Hours: 9:15 AM - 3:30 PM IST")
+    st.caption("📊 EMA: 9, 21, 50 | SMA: 20, 50, 200 | BB: 20,2 | Supertrend: 10,3 | Market Hours: 9:15 AM - 3:30 PM IST")
     
     col1, col2, col3 = st.columns(3)
     
@@ -511,6 +563,8 @@ with tab2:
         
         df['RSI'] = calculate_rsi(df['close'])
         df['MACD'], df['MACD_signal'], df['MACD_hist'] = calculate_macd(df['close'])
+        df['BB_upper'], df['BB_middle'], df['BB_lower'] = calculate_bollinger_bands(df['close'])
+        df['Supertrend'], df['ST_direction'] = calculate_supertrend(df)
         
         # Current metrics
         current = df['close'].iloc[-1]
@@ -698,7 +752,124 @@ with tab2:
         
         st.plotly_chart(fig_sma, use_container_width=True)
         
-        # 4. RSI - NO GAPS, CLEAN LABELS
+        # 4. BOLLINGER BANDS
+        st.subheader("📊 Bollinger Bands (20, 2)")
+        
+        fig_bb = go.Figure()
+        
+        fig_bb.add_trace(go.Scatter(
+            x=x_data, y=df_plot['BB_upper'],
+            name='Upper Band',
+            line=dict(color='#FF5722', width=1, dash='dash'),
+            mode='lines'
+        ))
+        
+        fig_bb.add_trace(go.Scatter(
+            x=x_data, y=df_plot['BB_middle'],
+            name='Middle Band (SMA 20)',
+            line=dict(color='#2196F3', width=1.5),
+            mode='lines',
+            fill='tonexty',
+            fillcolor='rgba(255, 87, 34, 0.1)'
+        ))
+        
+        fig_bb.add_trace(go.Scatter(
+            x=x_data, y=df_plot['BB_lower'],
+            name='Lower Band',
+            line=dict(color='#4CAF50', width=1, dash='dash'),
+            mode='lines',
+            fill='tonexty',
+            fillcolor='rgba(76, 175, 80, 0.1)'
+        ))
+        
+        fig_bb.add_trace(go.Scatter(
+            x=x_data, y=df_plot['close'],
+            name='Close Price',
+            line=dict(color='#000000', width=2),
+            mode='lines'
+        ))
+        
+        fig_bb.update_layout(
+            title="Bollinger Bands Analysis",
+            yaxis_title="Price (₹)",
+            xaxis_title="Time (IST)",
+            height=450,
+            hovermode='x unified',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            xaxis=dict(
+                type=xaxis_type,
+                tickformat=tickformat,
+                tickangle=-45,
+                nticks=15
+            ),
+            yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
+        )
+        
+        st.plotly_chart(fig_bb, use_container_width=True)
+        
+        # 5. SUPERTREND
+        st.subheader("🎯 Supertrend (10, 3)")
+        
+        fig_st = go.Figure()
+        
+        # Price candlesticks
+        fig_st.add_trace(go.Candlestick(
+            x=x_data,
+            open=df_plot['open'],
+            high=df_plot['high'],
+            low=df_plot['low'],
+            close=df_plot['close'],
+            name='Price',
+            increasing_line_color='#26a69a',
+            decreasing_line_color='#ef5350',
+            showlegend=False
+        ))
+        
+        # Supertrend line with color based on direction
+        # Buy signal (green)
+        buy_signal = df_plot[df_plot['ST_direction'] == 1]
+        if not buy_signal.empty:
+            buy_x = [x_data[i] for i in buy_signal.index if i < len(x_data)]
+            fig_st.add_trace(go.Scatter(
+                x=buy_x,
+                y=buy_signal['Supertrend'],
+                name='Buy Signal',
+                line=dict(color='#4CAF50', width=2),
+                mode='lines'
+            ))
+        
+        # Sell signal (red)
+        sell_signal = df_plot[df_plot['ST_direction'] == -1]
+        if not sell_signal.empty:
+            sell_x = [x_data[i] for i in sell_signal.index if i < len(x_data)]
+            fig_st.add_trace(go.Scatter(
+                x=sell_x,
+                y=sell_signal['Supertrend'],
+                name='Sell Signal',
+                line=dict(color='#ef5350', width=2),
+                mode='lines'
+            ))
+        
+        fig_st.update_layout(
+            title="Supertrend Indicator",
+            yaxis_title="Price (₹)",
+            xaxis_title="Time (IST)",
+            height=450,
+            hovermode='x unified',
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            xaxis=dict(
+                type=xaxis_type,
+                tickformat=tickformat,
+                tickangle=-45,
+                nticks=15,
+                rangeslider_visible=False
+            ),
+            yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
+        )
+        
+        st.plotly_chart(fig_st, use_container_width=True)
+        
+        # 6. RSI - NO GAPS, CLEAN LABELS
         st.subheader("📊 RSI (Relative Strength Index)")
         
         fig_rsi = go.Figure()
@@ -735,7 +906,7 @@ with tab2:
         
         st.plotly_chart(fig_rsi, use_container_width=True)
         
-        # 5. MACD - NO GAPS, CLEAN LABELS
+        # 7. MACD - NO GAPS, CLEAN LABELS
         st.subheader("📈 MACD (Moving Average Convergence Divergence)")
         
         fig_macd = go.Figure()
@@ -782,7 +953,7 @@ with tab2:
         st.markdown("---")
         st.subheader("🎯 Technical Signals Summary")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             st.markdown("**📊 Moving Averages**")
@@ -833,6 +1004,31 @@ with tab2:
                 
                 st.caption(f"MACD: {current_macd:.2f}")
                 st.caption(f"Signal: {current_signal:.2f}")
+            else:
+                st.caption("Calculating...")
+        
+        with col4:
+            st.markdown("**🎯 Bollinger & Supertrend**")
+            
+            # Bollinger Bands signal
+            bb_upper = df['BB_upper'].iloc[-1]
+            bb_lower = df['BB_lower'].iloc[-1]
+            
+            if not pd.isna(bb_upper) and not pd.isna(bb_lower):
+                if current_price > bb_upper:
+                    st.caption("🔴 Above BB Upper")
+                elif current_price < bb_lower:
+                    st.caption("🟢 Below BB Lower")
+                else:
+                    st.caption("⚪ Within BB Range")
+            
+            # Supertrend signal
+            st_direction = df['ST_direction'].iloc[-1]
+            if not pd.isna(st_direction):
+                if st_direction == 1:
+                    st.success("🟢 Supertrend BUY")
+                else:
+                    st.error("🔴 Supertrend SELL")
             else:
                 st.caption("Calculating...")
     
@@ -1071,7 +1267,7 @@ with tab4:
 # Footer
 st.markdown("---")
 st.caption("🔴 LIVE Dashboard powered by Zerodha Kite Connect WebSocket API")
-st.caption("📊 **Technical Indicators:** EMA (9, 21, 50) | SMA (20, 50, 200) | RSI | MACD")
+st.caption("📊 **Technical Indicators:** EMA (9, 21, 50) | SMA (20, 50, 200) | Bollinger Bands (20, 2) | Supertrend (10, 3) | RSI | MACD")
 st.caption("⏰ **Market Hours:** 9:15 AM - 3:30 PM IST (Mon-Fri)")
 st.caption("⚠ **Disclaimer:** For educational purposes only. Not financial advice. Trade at your own risk.")
 st.caption(f"📅 Last updated: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S IST')}")
