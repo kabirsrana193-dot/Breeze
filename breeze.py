@@ -1221,32 +1221,4 @@ st.caption("🔴 LIVE Dashboard powered by Zerodha Kite Connect WebSocket API")
 st.caption("📊 **Technical Indicators:** EMA (9, 21, 50) | SMA (20, 50, 200) | Bollinger Bands (20, 2) | Supertrend (10, 3) | RSI | MACD")
 st.caption("⏰ **Market Hours:** 9:15 AM - 3:30 PM IST (Mon-Fri)")
 st.caption("⚠ **Disclaimer:** For educational purposes only. Not financial advice. Trade at your own risk.")
-st.caption(f"📅 Last updated: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S IST')}")trace(go.Scatter(
-            x=x_data, y=df_plot['BB_upper'],
-            name='Upper Band',
-            line=dict(color='#FF5722', width=1, dash='dash'),
-            mode='lines',
-            visible=True
-        ))
-        
-        fig_bb.add_trace(go.Scatter(
-            x=x_data, y=df_plot['BB_middle'],
-            name='Middle Band (SMA 20)',
-            line=dict(color='#2196F3', width=1.5),
-            mode='lines',
-            fill='tonexty',
-            fillcolor='rgba(255, 87, 34, 0.1)',
-            visible=True
-        ))
-        
-        fig_bb.add_trace(go.Scatter(
-            x=x_data, y=df_plot['BB_lower'],
-            name='Lower Band',
-            line=dict(color='#4CAF50', width=1, dash='dash'),
-            mode='lines',
-            fill='tonexty',
-            fillcolor='rgba(76, 175, 80, 0.1)',
-            visible=True
-        ))
-        
-        fig_bb.add_
+st.caption(f"📅 Last updated: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S IST')}")
