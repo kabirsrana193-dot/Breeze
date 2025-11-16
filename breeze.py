@@ -23,11 +23,6 @@ st.set_page_config(
 # --------------------------
 # Configuration
 # --------------------------
-# NOTE: In production, use st.secrets instead of hardcoding
-# For now, update these values in Streamlit secrets or environment variables
-
-
-
 API_KEY = "aj0gv6rpjm11ecac"
 ACCESS_TOKEN = "SmCnbRkg9WhWv7FnF3cXpjEGBJkWqihw"
 
@@ -125,28 +120,61 @@ def fetch_historical_data(symbol, days=30, interval="day"):
         
         instrument_token = get_instrument_token(symbol)
         if not instrument_token:
-            st.warning(f"Instrument token not found for {symbol}")
             return None
         
         to_date = datetime.now()
         from_date = to_date - timedelta(days=days)
         
-        data = kite.historical_data(
-            instrument_token=instrument_token,
-            from_date=from_date,
-            to_date=to_date,
-            interval=interval
-        )
+        # For intraday data, adjust the date range
+        if interval in ["minute", "3minute", "5minute", "10minute", "15minute", "30minute", "60minute"]:
+            # For intraday, get today's data only if it's a trading day
+            # Otherwise get last trading day
+            if to_date.weekday() >= 5:  # Saturday or Sunday
+                days_back = to_date.weekday() - 4  # Go back to Friday
+                to_date = to_date - timedelta(days=days_back)
+                from_date = to_date.replace(hour=9, minute=0, second=0)
+            else:
+                from_date = to_date.replace(hour=9, minute=0, second=0)
         
-        if data:
-            df = pd.DataFrame(data)
-            df['date'] = pd.to_datetime(df['date'])
-            df = df.set_index('date')
-            return df
+        try:
+            data = kite.historical_data(
+                instrument_token=instrument_token,
+                from_date=from_date,
+                to_date=to_date,
+                interval=interval
+            )
+            
+            if data:
+                df = pd.DataFrame(data)
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'])
+                    df = df.set_index('date')
+                    return df
+            
+            return None
+        except Exception as e:
+            # If today's data fails, try yesterday
+            if interval in ["minute", "3minute", "5minute", "10minute", "15minute", "30minute", "60minute"]:
+                to_date = datetime.now() - timedelta(days=1)
+                from_date = to_date.replace(hour=9, minute=0, second=0)
+                
+                data = kite.historical_data(
+                    instrument_token=instrument_token,
+                    from_date=from_date,
+                    to_date=to_date,
+                    interval=interval
+                )
+                
+                if data:
+                    df = pd.DataFrame(data)
+                    if 'date' in df.columns:
+                        df['date'] = pd.to_datetime(df['date'])
+                        df = df.set_index('date')
+                        return df
+            
+            return None
         
-        return None
     except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
 
 # --------------------------
@@ -250,7 +278,6 @@ def get_live_quotes(symbols):
         quotes = kite.quote(formatted_symbols)
         return quotes
     except Exception as e:
-        st.error(f"Error fetching quotes: {e}")
         return None
 
 # --------------------------
@@ -265,7 +292,7 @@ if st.session_state.kite_connected:
     st.success(f"✅ Connected to Kite API | User: {profile.get('user_name', 'N/A')}")
 else:
     st.error("❌ Not connected to Kite API")
-    st.info("Please check your API key and access token in secrets")
+    st.info("Please check your API key and access token")
     st.stop()
 
 st.markdown("---")
@@ -528,9 +555,20 @@ with tab3:
             st.rerun()
     
     if watchlist:
-        # Get live quotes first for current prices
-        with st.spinner("Fetching live quotes..."):
-            live_quotes = get_live_quotes(watchlist)
+        # Try to get live quotes first
+        live_quotes = get_live_quotes(watchlist)
+        
+        # Display current market status
+        now = datetime.now()
+        market_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
+        market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+        
+        if market_open <= now <= market_close and now.weekday() < 5:
+            st.info("🟢 Market is OPEN - Showing live intraday data")
+        else:
+            st.warning("⚪ Market is CLOSED - Showing last trading day data")
+        
+        st.markdown("---")
         
         num_cols = 2 if len(watchlist) <= 4 else 3
         num_rows = (len(watchlist) + num_cols - 1) // num_cols
@@ -544,17 +582,33 @@ with tab3:
                     stock_symbol = watchlist[stock_idx]
                     
                     with col:
-                        df = fetch_historical_data(stock_symbol, 1, intraday_interval)
-                        
-                        if df is not None and not df.empty and len(df) >= 2:
-                            current = df['close'].iloc[-1]
-                            prev = df['close'].iloc[0]
+                        # Try to get live quote first
+                        if live_quotes and f"NSE:{stock_symbol}" in live_quotes:
+                            quote_data = live_quotes[f"NSE:{stock_symbol}"]
+                            current = quote_data.get('last_price', 0)
+                            prev = quote_data.get('ohlc', {}).get('close', current)
                             change = current - prev
-                            change_pct = (change / prev) * 100
+                            change_pct = (change / prev * 100) if prev > 0 else 0
                             arrow = "🟢" if change_pct >= 0 else "🔴"
                             
                             st.markdown(f"### {arrow} {stock_symbol}")
-                            st.metric("Price", f"₹{current:.2f}", f"{change:.2f} ({change_pct:.2f}%)")
+                            st.metric("LTP", f"₹{current:.2f}", f"{change:.2f} ({change_pct:.2f}%)")
+                        
+                        # Fetch historical intraday data for chart
+                        with st.spinner(f"Loading {stock_symbol}..."):
+                            df = fetch_historical_data(stock_symbol, 1, intraday_interval)
+                        
+                        if df is not None and not df.empty and len(df) >= 2:
+                            # If we don't have live quote, use historical data
+                            if not live_quotes or f"NSE:{stock_symbol}" not in live_quotes:
+                                current = df['close'].iloc[-1]
+                                prev = df['close'].iloc[0]
+                                change = current - prev
+                                change_pct = (change / prev) * 100
+                                arrow = "🟢" if change_pct >= 0 else "🔴"
+                                
+                                st.markdown(f"### {arrow} {stock_symbol}")
+                                st.metric("Price", f"₹{current:.2f}", f"{change:.2f} ({change_pct:.2f}%)")
                             
                             # Mini candlestick chart
                             fig = go.Figure(data=[go.Candlestick(
@@ -562,7 +616,8 @@ with tab3:
                                 open=df['open'],
                                 high=df['high'],
                                 low=df['low'],
-                                close=df['close']
+                                close=df['close'],
+                                name=stock_symbol
                             )])
                             fig.update_layout(
                                 height=250,
@@ -571,8 +626,12 @@ with tab3:
                                 xaxis_rangeslider_visible=False
                             )
                             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                            
+                            # Show data range
+                            st.caption(f"📊 {len(df)} candles | {df.index[0].strftime('%H:%M')} - {df.index[-1].strftime('%H:%M')}")
                         else:
-                            st.warning(f"No data for {stock_symbol}")
+                            st.warning(f"No intraday data available for {stock_symbol}")
+                            st.caption("Try: Market hours (9:15 AM - 3:30 PM) on trading days")
     else:
         st.info("👆 Select stocks to monitor")
 
