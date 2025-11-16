@@ -1,4 +1,4 @@
-\"""
+"""
 Kite Connect F&O Trading Dashboard with WebSocket Live Streaming
 Real-time tick data using KiteTicker
 UPDATED: Options Chain instead of News Dashboard
