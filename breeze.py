@@ -1,252 +1,64 @@
+"""
+Kite Connect F&O Trading Dashboard
+Streamlit application for trading with Zerodha Kite Connect API
+"""
+
 import streamlit as st
-import feedparser
 import pandas as pd
 from datetime import datetime, timedelta
-import time
-import plotly.express as px
 import plotly.graph_objects as go
-from breeze_connect import BreezeConnect
+from plotly.subplots import make_subplots
+import feedparser
+from kiteconnect import KiteConnect
+import time
 
 # Page config
 st.set_page_config(
-    page_title="F&O Dashboard - Breeze (Nifty 200)",
+    page_title="F&O Dashboard - Kite Connect",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
 # --------------------------
-# Breeze Configuration
+# Configuration
 # --------------------------
-app_key = "68`47N89970w1dH7u1s5347j8403f287"
-secret_key = "5v9k141093cf4361528$z24Q7(Yv2839"
-session_token = "53705299"
+# NOTE: In production, use st.secrets instead of hardcoding
+# For now, update these values in Streamlit secrets or environment variables
+
+if 'api_key' not in st.secrets:
+    st.error("⚠️ Please set up your Kite API credentials in Streamlit secrets")
+    st.info("""
+    Create a `.streamlit/secrets.toml` file with:
+    ```
+    api_key = "your_api_key"
+    access_token = "your_access_token"
+    ```
+    
+    Update access_token daily after login!
+    """)
+    st.stop()
+
+API_KEY = st.secrets["aj0gv6rpjm11ecac"]
+ACCESS_TOKEN = st.secrets["SmCnbRkg9WhWv7FnF3cXpjEGBJkWqihw"]
 
 # --------------------------
-# Nifty 200 Stocks
+# FNO Stocks List
 # --------------------------
 FNO_STOCKS = [
-    "Reliance Industries", "TCS", "HDFC Bank", "Infosys", "ICICI Bank",
-    "Bharti Airtel", "ITC", "State Bank of India", "HCL Technologies", "Axis Bank",
-    "Kotak Mahindra Bank", "Larsen & Toubro", "Bajaj Finance", "Asian Paints", "Maruti Suzuki",
-    "Titan Company", "Sun Pharma", "Wipro", "Ultratech Cement", "Tata Motors",
-    "Adani Ports", "Adani Enterprises", "Tech Mahindra", "Power Grid", "NTPC",
-    "Coal India", "Tata Steel", "Bajaj Finserv", "Hero MotoCorp", "IndusInd Bank",
-    "Mahindra & Mahindra", "Grasim Industries", "Hindalco", "JSW Steel", "SBI Life",
-    "ICICI Lombard", "Bajaj Auto", "HDFC Life", "Adani Green", "Shree Cement",
-    "Eicher Motors", "UPL", "Tata Consumer", "Britannia", "Nestle India",
-    "Hindustan Unilever", "Cipla", "Dr Reddy's", "Divi's Labs", "Apollo Hospitals",
-    "IOC", "BPCL", "ONGC", "Gail India", "Pidilite",
-    "Berger Paints", "Havells", "Godrej Consumer", "Dabur", "Marico",
-    "Colgate", "United Spirits", "Varun Beverages", "Zomato", "Paytm",
-    "LIC", "SBI Cards", "Cholamandalam", "Muthoot Finance", "Shriram Finance",
-    "Bosch", "ABB India", "Siemens", "Bharat Electronics", "BHEL",
-    "HAL", "L&T Technology", "Persistent", "Coforge", "Mphasis",
-    "LTIMindtree", "Oracle Financial", "DMart", "Trent", "Jubilant Food",
-    "PVR Inox", "IndiGo", "Indian Hotels", "Oberoi Realty", "DLF",
-    "Godrej Properties", "Prestige Estates", "Phoenix Mills", "Voltas", "Blue Star",
-    "Crompton Greaves", "Polycab", "Dixon Tech", "Amber Enterprises", "Tube Investments",
-    "Motherson Sumi", "Bharat Forge", "Balkrishna Ind", "Apollo Tyres", "MRF",
-    "Ashok Leyland", "TVS Motor", "Escorts Kubota", "Bajaj Holdings", "ICICI Prudential",
-    "Max Financial", "Star Health", "GIC", "New India Assurance", "Bank of Baroda",
-    "PNB", "Canara Bank", "Union Bank", "Indian Bank", "Bank of India",
-    "Central Bank", "IDBI Bank", "AU Small Finance", "Bandhan Bank", "Federal Bank",
-    "IDFC First Bank", "RBL Bank", "Yes Bank", "City Union Bank", "Karur Vysya Bank",
-    "Manappuram Finance", "PNB Housing", "Can Fin Homes", "Aarti Industries", "Deepak Nitrite",
-    "Navin Fluorine", "PI Industries", "SRF", "Atul Ltd", "Vinati Organics",
-    "Gujarat Gas", "Petronet LNG", "IGL", "MGL", "Adani Total Gas",
-    "Adani Transmission", "Adani Power", "JSW Energy", "Tata Power", "Torrent Power",
-    "CESC", "Alkem Labs", "Lupin", "Aurobindo Pharma", "Biocon",
-    "Torrent Pharma", "Zydus Life", "Glenmark", "Ipca Labs", "Natco Pharma",
-    "Mankind Pharma", "Laurus Labs", "Max Healthcare", "Fortis Healthcare", "Narayana Health",
-    "Metropolis", "Dr Lal PathLabs", "Vedanta", "Jindal Steel", "NMDC",
-    "SAIL", "Hindustan Zinc", "NALCO", "Astral", "Supreme Industries",
-    "Finolex Cables", "KEI Industries", "Ahluwalia Contracts", "NCC", "PNC Infratech",
-    "KEC International", "Kalpataru Projects", "IRB Infrastructure", "NBCC", "Container Corp",
-    "Concor", "IRCTC", "Mazagon Dock", "BEML", "Cochin Shipyard",
-    "NMDC Steel", "Redington", "V-Guard", "Cera Sanitary", "Kajaria Ceramics",
-    "Somany Ceramics", "Orient Electric", "Crompton Consumer", "Symphony", "Whirlpool",
-    "IFB Industries", "Butterfly Gandhimathi", "TTK Prestige", "Bajaj Electricals", "GMR Airports",
-    "AAI", "Gateway Distriparks", "Allcargo Logistics", "VRL Logistics", "TCI Express",
-    "Blue Dart", "Gati", "Mahindra Logistics", "KPIT Technologies", "Tata Elxsi",
-    "Cyient", "Zensar Tech", "Sonata Software", "Mastek", "Happiest Minds"
+    "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK",
+    "BHARTIARTL", "ITC", "SBIN", "HCLTECH", "AXISBANK",
+    "KOTAKBANK", "LT", "BAJFINANCE", "ASIANPAINT", "MARUTI",
+    "TITAN", "SUNPHARMA", "WIPRO", "ULTRACEMCO", "TATAMOTORS",
+    "ADANIPORTS", "ADANIENT", "TECHM", "POWERGRID", "NTPC",
+    "COALINDIA", "TATASTEEL", "BAJAJFINSV", "HEROMOTOCO", "INDUSINDBK",
+    "M&M", "GRASIM", "HINDALCO", "JSWSTEEL", "SBILIFE",
+    "ICICIGI", "BAJAJ-AUTO", "HDFCLIFE", "ADANIGREEN", "SHREECEM",
+    "EICHERMOT", "UPL", "TATACONSUM", "BRITANNIA", "NESTLEIND",
+    "HINDUNILVR", "CIPLA", "DRREDDY", "DIVISLAB", "APOLLOHOSP"
 ]
 
-# Stock code mapping (6-letter ICICI Breeze codes)
-STOCK_CODE_MAP = {
-    "Reliance Industries": "RELIND",
-    "TCS": "TCS",
-    "HDFC Bank": "HDFBAN",
-    "Infosys": "INFTEC",
-    "ICICI Bank": "ICIBAN",
-    "Bharti Airtel": "BHAAIR",
-    "ITC": "ITC",
-    "State Bank of India": "STABAN",
-    "HCL Technologies": "HCLTEC",
-    "Axis Bank": "AXIBAN",
-    "Kotak Mahindra Bank": "KOTMAH",
-    "Larsen & Toubro": "LARTOU",
-    "Bajaj Finance": "BAJFI",
-    "Asian Paints": "ASIPAI",
-    "Maruti Suzuki": "MARUTI",
-    "Titan Company": "TITIND",
-    "Sun Pharma": "SUNPHA",
-    "Wipro": "WIPRO",
-    "Ultratech Cement": "ULTCEM",
-    "Tata Motors": "TATMOT",
-    "Adani Ports": "ADAPOR",
-    "Adani Enterprises": "ADAENT",
-    "Tech Mahindra": "TECMAH",
-    "Power Grid": "POWGRI",
-    "NTPC": "NTPC",
-    "Coal India": "COALIN",
-    "Tata Steel": "TATSTE",
-    "Bajaj Finserv": "BAFINS",
-    "Hero MotoCorp": "HERHON",
-    "IndusInd Bank": "INDBA",
-    "Mahindra & Mahindra": "MAHMAH",
-    "Grasim Industries": "GRASIM",
-    "Hindalco": "HINDAL",
-    "JSW Steel": "JSWSTE",
-    "SBI Life": "SBILIF",
-    "ICICI Lombard": "ICILOM",
-    "Bajaj Auto": "BAAUTO",
-    "HDFC Life": "HDFSTA",
-    "Adani Green": "ADAGRE",
-    "Shree Cement": "SHRCEM",
-    "Eicher Motors": "EICHER",
-    "UPL": "UNIP",
-    "Tata Consumer": "TATGLO",
-    "Britannia": "BRIIND",
-    "Nestle India": "NESIND",
-    "Hindustan Unilever": "HINLEV",
-    "Cipla": "CIPLA",
-    "Dr Reddy's": "DRREDD",
-    "Divi's Labs": "DIVLAB",
-    "Apollo Hospitals": "APOHOS",
-    "IOC": "INDOIL",
-    "BPCL": "BHAPET",
-    "ONGC": "ONGC",
-    "Gail India": "GAIL",
-    "Pidilite": "PIDIND",
-    "Berger Paints": "BERPAI",
-    "Havells": "HAVIND",
-    "Godrej Consumer": "GODCON",
-    "Dabur": "DABIND",
-    "Marico": "MARLIM",
-    "Colgate": "COLPAL",
-    "United Spirits": "UNISPI",
-    "Varun Beverages": "VARBEV",
-    "Zomato": "ZOMATO",
-    "Paytm": "ONE97",
-    "LIC": "LIC",
-    "SBI Cards": "SBICAR",
-    "Cholamandalam": "CHOINV",
-    "Muthoot Finance": "MUTFIN",
-    "Shriram Finance": "SHRTRA",
-    "Bosch": "BOSLIM",
-    "ABB India": "ABB",
-    "Siemens": "SIEMEN",
-    "Bharat Electronics": "BHAELE",
-    "BHEL": "BHEL",
-    "HAL": "HINAER",
-    "L&T Technology": "LTTEC",
-    "Persistent": "PERSYS",
-    "Coforge": "NIITEC",
-    "Mphasis": "MPHLIM",
-    "LTIMindtree": "LTINFO",
-    "Oracle Financial": "ORAFIN",
-    "DMart": "AVESUP",
-    "Trent": "TRENT",
-    "Jubilant Food": "JUBFOO",
-    "PVR Inox": "PVRLIM",
-    "IndiGo": "INTAVI",
-    "Indian Hotels": "INDHOT",
-    "Oberoi Realty": "OBEREA",
-    "DLF": "DLFLIM",
-    "Godrej Properties": "GODPRO",
-    "Prestige Estates": "PREEST",
-    "Phoenix Mills": "PHOMIL",
-    "Voltas": "VOLTAS",
-    "Blue Star": "BLUSTA",
-    "Crompton Greaves": "CROGR",
-    "Polycab": "POLI",
-    "Dixon Tech": "DIXTEC",
-    "Amber Enterprises": "AMBEN",
-    "Tube Investments": "TUBEIN",
-    "Motherson Sumi": "MOTSU",
-    "Bharat Forge": "BHAFOR",
-    "Balkrishna Ind": "BALIND",
-    "Apollo Tyres": "APOTYR",
-    "MRF": "MRFTYR",
-    "Ashok Leyland": "ASHLEY",
-    "TVS Motor": "TVSMOT",
-    "Escorts Kubota": "ESCORT",
-    "Bajaj Holdings": "BAJHOL",
-    "ICICI Prudential": "ICPRU",
-    "Max Financial": "MAXFIN",
-    "Star Health": "STAHEA",
-    "GIC": "GIC",
-    "New India Assurance": "NEWIN",
-    "Bank of Baroda": "BANBAR",
-    "PNB": "PNBGIL",
-    "Canara Bank": "CANBAN",
-    "Union Bank": "UNIBAN",
-    "Indian Bank": "INDBAN",
-    "Bank of India": "BANIND",
-    "Central Bank": "CENBAN",
-    "IDBI Bank": "IDBI",
-    "AU Small Finance": "AUSMA",
-    "Bandhan Bank": "BANBAN",
-    "Federal Bank": "FEDBAN",
-    "IDFC First Bank": "IDFBAN",
-    "RBL Bank": "RBLBAN",
-    "Yes Bank": "YESBAN",
-    "Karur Vysya Bank": "KARVYS",
-    "Manappuram Finance": "MANAFI",
-    "PNB Housing": "PNBHOU",
-    "Can Fin Homes": "CANHOM",
-    "Aarti Industries": "AARIND",
-    "Deepak Nitrite": "DEENIT",
-    "Navin Fluorine": "NAVFLU",
-    "PI Industries": "PIIND",
-    "SRF": "SRF",
-    "Atul Ltd": "ATUL",
-    "Vinati Organics": "VINORG",
-    "Gujarat Gas": "GUJGA",
-    "Petronet LNG": "PETLNG",
-    "IGL": "INDGAS",
-    "MGL": "MAHGAS",
-    "Adani Total Gas": "ADAGAS",
-    "Adani Power": "ADAPOW",
-    "JSW Energy": "JSWENE",
-    "Tata Power": "TATPOW",
-    "Torrent Power": "TORPOW",
-    "CESC": "CESC",
-    "Alkem Labs": "ALKLAB",
-    "Lupin": "LUPIN",
-    "Aurobindo Pharma": "AURPHA",
-    "Biocon": "BIOCON",
-    "Torrent Pharma": "TORPHA",
-    "Zydus Life": "CADHEA",
-    "Glenmark": "GLEPHA",
-    "Ipca Labs": "IPCLAB",
-    "Natco Pharma": "NATPHA",
-    "Mankind Pharma": "MANKIND",
-    "Laurus Labs": "LAULAB",
-    "Max Healthcare": "MAXHEA",
-    "Fortis Healthcare": "FORHEA",
-    "Narayana Health": "NARHRU",
-    "Vedanta": "VEDLIM",
-    "Jindal Steel": "JINSP",
-    "NMDC": "NATMIN",
-    "SAIL": "SAIL",
-    "Hindustan Zinc": "HINZIN",
-    "NALCO": "NALCHE"
-}
-
-
-
+# RSS Feeds
 FINANCIAL_RSS_FEEDS = [
     ("https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms", "ET Markets"),
     ("https://www.moneycontrol.com/rss/latestnews.xml", "Moneycontrol"),
@@ -255,101 +67,97 @@ FINANCIAL_RSS_FEEDS = [
 # --------------------------
 # Initialize session state
 # --------------------------
-if 'breeze_client' not in st.session_state:
-    st.session_state.breeze_client = None
-if 'breeze_connected' not in st.session_state:
-    st.session_state.breeze_connected = False
+if 'kite' not in st.session_state:
+    st.session_state.kite = None
+if 'kite_connected' not in st.session_state:
+    st.session_state.kite_connected = False
 if 'news_articles' not in st.session_state:
     st.session_state.news_articles = []
+if 'instruments_df' not in st.session_state:
+    st.session_state.instruments_df = None
 
 # --------------------------
-# Breeze Connection
+# Kite Connection
 # --------------------------
 @st.cache_resource
-def init_breeze():
+def init_kite():
+    """Initialize Kite Connect"""
     try:
-        breeze = BreezeConnect(api_key=app_key)
-        breeze.generate_session(api_secret=secret_key, session_token=session_token)
-        return breeze, True
+        kite = KiteConnect(api_key=API_KEY)
+        kite.set_access_token(ACCESS_TOKEN)
+        
+        # Test connection
+        profile = kite.profile()
+        
+        return kite, True, profile
     except Exception as e:
         st.error(f"Connection Error: {str(e)}")
-        return None, False
+        return None, False, None
 
-if not st.session_state.breeze_connected:
-    breeze, connected = init_breeze()
-    st.session_state.breeze_client = breeze
-    st.session_state.breeze_connected = connected
+if not st.session_state.kite_connected:
+    kite, connected, profile = init_kite()
+    st.session_state.kite = kite
+    st.session_state.kite_connected = connected
+    st.session_state.profile = profile
 
 # --------------------------
-# Data Functions
+# Helper Functions
 # --------------------------
-def fetch_historical_data(stock_code, days=30, interval="1day"):
-    """Fetch historical data with error handling"""
+@st.cache_data(ttl=300)
+def get_instruments():
+    """Get and cache instruments list"""
     try:
-        breeze = st.session_state.breeze_client
-        if not breeze:
+        instruments = st.session_state.kite.instruments("NSE")
+        df = pd.DataFrame(instruments)
+        return df
+    except Exception as e:
+        st.error(f"Error fetching instruments: {e}")
+        return None
+
+def get_instrument_token(symbol):
+    """Get instrument token for a symbol"""
+    if st.session_state.instruments_df is None:
+        st.session_state.instruments_df = get_instruments()
+    
+    if st.session_state.instruments_df is not None:
+        result = st.session_state.instruments_df[
+            st.session_state.instruments_df['tradingsymbol'] == symbol
+        ]
+        if not result.empty:
+            return result.iloc[0]['instrument_token']
+    return None
+
+def fetch_historical_data(symbol, days=30, interval="day"):
+    """Fetch historical data from Kite"""
+    try:
+        kite = st.session_state.kite
+        if not kite:
+            return None
+        
+        instrument_token = get_instrument_token(symbol)
+        if not instrument_token:
+            st.warning(f"Instrument token not found for {symbol}")
             return None
         
         to_date = datetime.now()
         from_date = to_date - timedelta(days=days)
         
-        from_date_str = from_date.strftime("%Y-%m-%d") + "T07:00:00.000Z"
-        to_date_str = to_date.strftime("%Y-%m-%d") + "T23:59:59.000Z"
-        
-        response = breeze.get_historical_data(
-            interval=interval,
-            from_date=from_date_str,
-            to_date=to_date_str,
-            stock_code=stock_code,
-            exchange_code="NSE",
-            product_type="cash"
+        data = kite.historical_data(
+            instrument_token=instrument_token,
+            from_date=from_date,
+            to_date=to_date,
+            interval=interval
         )
         
-        time.sleep(0.7)  # Rate limiting
-        
-        if response and 'Success' in response and response['Success']:
-            df = pd.DataFrame(response['Success'])
-            
-            # Handle different column names
-            if 'datetime' in df.columns:
-                df['Date'] = pd.to_datetime(df['datetime'])
-            elif 'stock_date_time' in df.columns:
-                df['Date'] = pd.to_datetime(df['stock_date_time'])
-            
-            # Standardize column names
-            rename_map = {}
-            for col in df.columns:
-                col_lower = col.lower()
-                if col_lower == 'open':
-                    rename_map[col] = 'Open'
-                elif col_lower == 'high':
-                    rename_map[col] = 'High'
-                elif col_lower == 'low':
-                    rename_map[col] = 'Low'
-                elif col_lower == 'close':
-                    rename_map[col] = 'Close'
-                elif col_lower == 'volume':
-                    rename_map[col] = 'Volume'
-            
-            df = df.rename(columns=rename_map)
-            
-            if 'Date' in df.columns:
-                df = df.set_index('Date')
-                df = df.sort_index()
-                
-                # Convert to numeric
-                for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                    if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                
-                # Remove NaN rows
-                df = df.dropna(subset=['Close'])
-                
-                return df
+        if data:
+            df = pd.DataFrame(data)
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.set_index('date')
+            return df
         
         return None
     except Exception as e:
-        st.error(f"Error fetching {stock_code}: {str(e)}")
+        st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
 
 # --------------------------
@@ -357,39 +165,28 @@ def fetch_historical_data(stock_code, days=30, interval="1day"):
 # --------------------------
 def calculate_sma(data, period):
     """Simple Moving Average"""
-    try:
-        return data.rolling(window=period).mean()
-    except:
-        return pd.Series(index=data.index)
+    return data.rolling(window=period).mean()
 
 def calculate_ema(data, period):
     """Exponential Moving Average"""
-    try:
-        return data.ewm(span=period, adjust=False).mean()
-    except:
-        return pd.Series(index=data.index)
+    return data.ewm(span=period, adjust=False).mean()
 
 def calculate_rsi(data, period=14):
     """RSI Indicator"""
-    try:
-        delta = data.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / (loss + 0.0001)
-        return 100 - (100 / (1 + rs))
-    except:
-        return pd.Series(index=data.index)
+    delta = data.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / (loss + 0.0001)
+    return 100 - (100 / (1 + rs))
 
 def calculate_macd(data, fast=12, slow=26, signal=9):
     """MACD Indicator"""
-    try:
-        exp1 = data.ewm(span=fast, adjust=False).mean()
-        exp2 = data.ewm(span=slow, adjust=False).mean()
-        macd = exp1 - exp2
-        signal_line = macd.ewm(span=signal, adjust=False).mean()
-        return macd, signal_line
-    except:
-        return pd.Series(index=data.index), pd.Series(index=data.index)
+    exp1 = data.ewm(span=fast, adjust=False).mean()
+    exp2 = data.ewm(span=slow, adjust=False).mean()
+    macd = exp1 - exp2
+    signal_line = macd.ewm(span=signal, adjust=False).mean()
+    histogram = macd - signal_line
+    return macd, signal_line, histogram
 
 # --------------------------
 # Sentiment Analysis
@@ -452,23 +249,40 @@ def fetch_news(num_articles=12, specific_stock=None):
     
     return all_articles[:num_articles]
 
+def get_live_quotes(symbols):
+    """Get live quotes for symbols"""
+    try:
+        kite = st.session_state.kite
+        if not kite:
+            return None
+        
+        # Format symbols for Kite
+        formatted_symbols = [f"NSE:{symbol}" for symbol in symbols]
+        quotes = kite.quote(formatted_symbols)
+        return quotes
+    except Exception as e:
+        st.error(f"Error fetching quotes: {e}")
+        return None
+
 # --------------------------
 # Streamlit App
 # --------------------------
 
-st.title("📈 F&O Dashboard - ICICI Breeze")
+st.title("📈 F&O Dashboard - Kite Connect")
 
 # Connection Status
-if st.session_state.breeze_connected:
-    st.success("✅ Connected to Breeze API")
+if st.session_state.kite_connected:
+    profile = st.session_state.profile
+    st.success(f"✅ Connected to Kite API | User: {profile.get('user_name', 'N/A')}")
 else:
-    st.error("❌ Not connected to Breeze API")
+    st.error("❌ Not connected to Kite API")
+    st.info("Please check your API key and access token in secrets")
     st.stop()
 
 st.markdown("---")
 
 # Main tabs
-tab1, tab2, tab3 = st.tabs(["📰 News", "💹 Charts & Indicators", "⚡ Intraday Monitor"])
+tab1, tab2, tab3, tab4 = st.tabs(["📰 News", "💹 Charts & Indicators", "⚡ Intraday Monitor", "📊 Portfolio"])
 
 # TAB 1: NEWS
 with tab1:
@@ -489,7 +303,8 @@ with tab1:
             st.success("News refreshed!")
     
     if not st.session_state.news_articles:
-        st.session_state.news_articles = fetch_news(12, stock_filter)
+        with st.spinner("Loading news..."):
+            st.session_state.news_articles = fetch_news(12, stock_filter)
     
     if st.session_state.news_articles:
         df_news = pd.DataFrame(st.session_state.news_articles)
@@ -538,167 +353,162 @@ with tab2:
     with col2:
         period = st.selectbox(
             "Period",
-            {"1 Week": 7, "2 Weeks": 14, "1 Month": 30, "3 Months": 90},
-            format_func=lambda x: x,
+            ["1 Week", "2 Weeks", "1 Month", "3 Months", "6 Months"],
             key="chart_period"
         )
-        days = {"1 Week": 7, "2 Weeks": 14, "1 Month": 30, "3 Months": 90}[period]
+        days_map = {"1 Week": 7, "2 Weeks": 14, "1 Month": 30, "3 Months": 90, "6 Months": 180}
+        days = days_map[period]
     
     with col3:
         interval = st.selectbox(
             "Interval",
-            ["1day", "30minute", "5minute", "1minute"],
-            format_func=lambda x: {"1day": "Daily", "30minute": "30 Min", "5minute": "5 Min", "1minute": "1 Min"}[x],
+            ["day", "60minute", "30minute", "15minute", "5minute"],
+            format_func=lambda x: {"day": "Daily", "60minute": "60 Min", "30minute": "30 Min", 
+                                   "15minute": "15 Min", "5minute": "5 Min"}[x],
             key="chart_interval"
         )
     
-    if interval != "1day" and days > 5:
-        st.info("ℹ️ Intraday data limited to 5 days")
-        days = 5
+    # Intraday data limited to fewer days
+    if interval != "day" and days > 30:
+        st.info("ℹ️ Intraday data limited to 30 days")
+        days = 30
     
-    stock_code = STOCK_CODE_MAP.get(selected_stock)
+    with st.spinner(f"Loading data for {selected_stock}..."):
+        df = fetch_historical_data(selected_stock, days, interval)
     
-    if stock_code:
-        with st.spinner(f"Loading data for {selected_stock}..."):
-            df = fetch_historical_data(stock_code, days, interval)
+    if df is not None and not df.empty and len(df) > 0:
+        # Calculate indicators
+        df['SMA_20'] = calculate_sma(df['close'], 20)
+        df['SMA_50'] = calculate_sma(df['close'], 50)
+        df['EMA_12'] = calculate_ema(df['close'], 12)
+        df['EMA_26'] = calculate_ema(df['close'], 26)
+        df['RSI'] = calculate_rsi(df['close'])
+        df['MACD'], df['MACD_Signal'], df['MACD_Hist'] = calculate_macd(df['close'])
         
-        if df is not None and not df.empty and len(df) > 0:
-            # Calculate indicators
-            df['SMA_20'] = calculate_sma(df['Close'], 20)
-            df['SMA_50'] = calculate_sma(df['Close'], 50)
-            df['EMA_12'] = calculate_ema(df['Close'], 12)
-            df['EMA_26'] = calculate_ema(df['Close'], 26)
-            df['RSI'] = calculate_rsi(df['Close'])
-            df['MACD'], df['MACD_Signal'] = calculate_macd(df['Close'])
-            
-            # Metrics
-            current = df['Close'].iloc[-1]
-            prev = df['Close'].iloc[0]
-            change = current - prev
-            change_pct = (change / prev) * 100
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Current Price", f"₹{current:.2f}")
-            with col2:
-                st.metric("Change", f"₹{change:.2f}", f"{change_pct:.2f}%")
-            with col3:
-                st.metric("High", f"₹{df['High'].max():.2f}")
-            with col4:
-                st.metric("Low", f"₹{df['Low'].min():.2f}")
-            
-            st.markdown("---")
-            
-            # Candlestick chart with moving averages
-            fig = go.Figure()
-            
-            if all(col in df.columns for col in ['Open', 'High', 'Low', 'Close']):
-                fig.add_trace(go.Candlestick(
-                    x=df.index,
-                    open=df['Open'],
-                    high=df['High'],
-                    low=df['Low'],
-                    close=df['Close'],
-                    name='Price'
-                ))
-                
-                # Add moving averages
-                if 'SMA_20' in df.columns:
-                    fig.add_trace(go.Scatter(
-                        x=df.index,
-                        y=df['SMA_20'],
-                        mode='lines',
-                        name='SMA 20',
-                        line=dict(color='blue', width=1.5)
-                    ))
-                
-                if 'SMA_50' in df.columns:
-                    fig.add_trace(go.Scatter(
-                        x=df.index,
-                        y=df['SMA_50'],
-                        mode='lines',
-                        name='SMA 50',
-                        line=dict(color='orange', width=1.5)
-                    ))
-                
-                if 'EMA_12' in df.columns:
-                    fig.add_trace(go.Scatter(
-                        x=df.index,
-                        y=df['EMA_12'],
-                        mode='lines',
-                        name='EMA 12',
-                        line=dict(color='green', width=1.5, dash='dash')
-                    ))
-                
-                if 'EMA_26' in df.columns:
-                    fig.add_trace(go.Scatter(
-                        x=df.index,
-                        y=df['EMA_26'],
-                        mode='lines',
-                        name='EMA 26',
-                        line=dict(color='red', width=1.5, dash='dash')
-                    ))
-                
-                fig.update_layout(
-                    title=f"{selected_stock} - Price Chart with SMA & EMA",
-                    xaxis_title="Date/Time",
-                    yaxis_title="Price (₹)",
-                    height=500,
-                    xaxis_rangeslider_visible=False,
-                    hovermode='x unified'
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # RSI Chart
-            if 'RSI' in df.columns:
-                df_rsi = df.dropna(subset=['RSI'])
-                if len(df_rsi) > 0:
-                    fig_rsi = go.Figure()
-                    fig_rsi.add_trace(go.Scatter(
-                        x=df_rsi.index,
-                        y=df_rsi['RSI'],
-                        mode='lines',
-                        name='RSI',
-                        line=dict(color='purple', width=2)
-                    ))
-                    fig_rsi.add_hline(y=70, line_dash="dash", line_color="red")
-                    fig_rsi.add_hline(y=30, line_dash="dash", line_color="green")
-                    fig_rsi.update_layout(
-                        title="RSI Indicator",
-                        height=250,
-                        yaxis_range=[0, 100]
-                    )
-                    st.plotly_chart(fig_rsi, use_container_width=True)
-            
-            # MACD Chart
-            if 'MACD' in df.columns and 'MACD_Signal' in df.columns:
-                df_macd = df.dropna(subset=['MACD', 'MACD_Signal'])
-                if len(df_macd) > 0:
-                    fig_macd = go.Figure()
-                    fig_macd.add_trace(go.Scatter(
-                        x=df_macd.index,
-                        y=df_macd['MACD'],
-                        mode='lines',
-                        name='MACD',
-                        line=dict(color='blue', width=2)
-                    ))
-                    fig_macd.add_trace(go.Scatter(
-                        x=df_macd.index,
-                        y=df_macd['MACD_Signal'],
-                        mode='lines',
-                        name='Signal',
-                        line=dict(color='red', width=2)
-                    ))
-                    fig_macd.update_layout(
-                        title="MACD Indicator",
-                        height=250
-                    )
-                    st.plotly_chart(fig_macd, use_container_width=True)
-        else:
-            st.error(f"Could not fetch data for {selected_stock}")
-            st.info("Try: 1) Different stock 2) Check stock code with breeze.get_names()")
+        # Metrics
+        current = df['close'].iloc[-1]
+        prev = df['close'].iloc[0]
+        change = current - prev
+        change_pct = (change / prev) * 100
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Current Price", f"₹{current:.2f}")
+        with col2:
+            st.metric("Change", f"₹{change:.2f}", f"{change_pct:.2f}%")
+        with col3:
+            st.metric("High", f"₹{df['high'].max():.2f}")
+        with col4:
+            st.metric("Low", f"₹{df['low'].min():.2f}")
+        
+        st.markdown("---")
+        
+        # Candlestick chart with moving averages
+        fig = go.Figure()
+        
+        fig.add_trace(go.Candlestick(
+            x=df.index,
+            open=df['open'],
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            name='Price'
+        ))
+        
+        # Add moving averages
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df['SMA_20'],
+            mode='lines',
+            name='SMA 20',
+            line=dict(color='blue', width=1.5)
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df['SMA_50'],
+            mode='lines',
+            name='SMA 50',
+            line=dict(color='orange', width=1.5)
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df['EMA_12'],
+            mode='lines',
+            name='EMA 12',
+            line=dict(color='green', width=1.5, dash='dash')
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df['EMA_26'],
+            mode='lines',
+            name='EMA 26',
+            line=dict(color='red', width=1.5, dash='dash')
+        ))
+        
+        fig.update_layout(
+            title=f"{selected_stock} - Price Chart with SMA & EMA",
+            xaxis_title="Date/Time",
+            yaxis_title="Price (₹)",
+            height=500,
+            xaxis_rangeslider_visible=False,
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # RSI Chart
+        df_rsi = df.dropna(subset=['RSI'])
+        if len(df_rsi) > 0:
+            fig_rsi = go.Figure()
+            fig_rsi.add_trace(go.Scatter(
+                x=df_rsi.index,
+                y=df_rsi['RSI'],
+                mode='lines',
+                name='RSI',
+                line=dict(color='purple', width=2)
+            ))
+            fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought")
+            fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold")
+            fig_rsi.update_layout(
+                title="RSI Indicator",
+                height=250,
+                yaxis_range=[0, 100]
+            )
+            st.plotly_chart(fig_rsi, use_container_width=True)
+        
+        # MACD Chart
+        df_macd = df.dropna(subset=['MACD', 'MACD_Signal'])
+        if len(df_macd) > 0:
+            fig_macd = go.Figure()
+            fig_macd.add_trace(go.Scatter(
+                x=df_macd.index,
+                y=df_macd['MACD'],
+                mode='lines',
+                name='MACD',
+                line=dict(color='blue', width=2)
+            ))
+            fig_macd.add_trace(go.Scatter(
+                x=df_macd.index,
+                y=df_macd['MACD_Signal'],
+                mode='lines',
+                name='Signal',
+                line=dict(color='red', width=2)
+            ))
+            fig_macd.add_trace(go.Bar(
+                x=df_macd.index,
+                y=df_macd['MACD_Hist'],
+                name='Histogram',
+                marker_color='gray'
+            ))
+            fig_macd.update_layout(
+                title="MACD Indicator",
+                height=250
+            )
+            st.plotly_chart(fig_macd, use_container_width=True)
     else:
-        st.error(f"Stock code not found for {selected_stock}")
+        st.error(f"Could not fetch data for {selected_stock}")
 
 # TAB 3: INTRADAY MONITOR
 with tab3:
@@ -708,9 +518,9 @@ with tab3:
     
     with col1:
         watchlist = st.multiselect(
-            "Select Stocks",
+            "Select Stocks (max 6)",
             FNO_STOCKS,
-            default=FNO_STOCKS[:4],
+            default=["RELIANCE", "TCS", "HDFCBANK", "INFY"],
             max_selections=6,
             key="intraday_stocks"
         )
@@ -718,8 +528,9 @@ with tab3:
     with col2:
         intraday_interval = st.selectbox(
             "Interval",
-            ["1minute", "5minute", "30minute"],
-            format_func=lambda x: {"1minute": "1 Min", "5minute": "5 Min", "30minute": "30 Min"}[x],
+            ["5minute", "15minute", "30minute", "60minute"],
+            format_func=lambda x: {"5minute": "5 Min", "15minute": "15 Min", 
+                                   "30minute": "30 Min", "60minute": "60 Min"}[x],
             key="intraday_interval"
         )
     
@@ -728,6 +539,10 @@ with tab3:
             st.rerun()
     
     if watchlist:
+        # Get live quotes first for current prices
+        with st.spinner("Fetching live quotes..."):
+            live_quotes = get_live_quotes(watchlist)
+        
         num_cols = 2 if len(watchlist) <= 4 else 3
         num_rows = (len(watchlist) + num_cols - 1) // num_cols
         
@@ -737,63 +552,113 @@ with tab3:
                 stock_idx = row * num_cols + col_idx
                 
                 if stock_idx < len(watchlist):
-                    stock_name = watchlist[stock_idx]
-                    stock_code = STOCK_CODE_MAP.get(stock_name)
+                    stock_symbol = watchlist[stock_idx]
                     
                     with col:
-                        if stock_code:
-                            df = fetch_historical_data(stock_code, 1, intraday_interval)
+                        df = fetch_historical_data(stock_symbol, 1, intraday_interval)
+                        
+                        if df is not None and not df.empty and len(df) >= 2:
+                            current = df['close'].iloc[-1]
+                            prev = df['close'].iloc[0]
+                            change = current - prev
+                            change_pct = (change / prev) * 100
+                            arrow = "🟢" if change_pct >= 0 else "🔴"
                             
-                            if df is not None and not df.empty and len(df) >= 2:
-                                current = df['Close'].iloc[-1]
-                                prev = df['Close'].iloc[0]
-                                change = current - prev
-                                change_pct = (change / prev) * 100
-                                arrow = "🟢" if change_pct >= 0 else "🔴"
-                                
-                                st.markdown(f"### {arrow} {stock_name}")
-                                st.metric("Price", f"₹{current:.2f}", f"{change:.2f} ({change_pct:.2f}%)")
-                                
-                                # Candlestick chart
-                                if all(col in df.columns for col in ['Open', 'High', 'Low', 'Close']):
-                                    fig = go.Figure(data=[go.Candlestick(
-                                        x=df.index,
-                                        open=df['Open'],
-                                        high=df['High'],
-                                        low=df['Low'],
-                                        close=df['Close']
-                                    )])
-                                    fig.update_layout(
-                                        height=250,
-                                        margin=dict(l=10, r=10, t=10, b=10),
-                                        showlegend=False,
-                                        xaxis_rangeslider_visible=False
-                                    )
-                                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-                                else:
-                                    # Line chart fallback
-                                    fig = go.Figure()
-                                    fig.add_trace(go.Scatter(
-                                        x=df.index,
-                                        y=df['Close'],
-                                        mode='lines',
-                                        line=dict(color='green' if change_pct >= 0 else 'red', width=2),
-                                        fill='tozeroy'
-                                    ))
-                                    fig.update_layout(
-                                        height=250,
-                                        margin=dict(l=10, r=10, t=10, b=10),
-                                        showlegend=False
-                                    )
-                                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-                            else:
-                                st.warning(f"No data for {stock_name}")
+                            st.markdown(f"### {arrow} {stock_symbol}")
+                            st.metric("Price", f"₹{current:.2f}", f"{change:.2f} ({change_pct:.2f}%)")
+                            
+                            # Mini candlestick chart
+                            fig = go.Figure(data=[go.Candlestick(
+                                x=df.index,
+                                open=df['open'],
+                                high=df['high'],
+                                low=df['low'],
+                                close=df['close']
+                            )])
+                            fig.update_layout(
+                                height=250,
+                                margin=dict(l=10, r=10, t=10, b=10),
+                                showlegend=False,
+                                xaxis_rangeslider_visible=False
+                            )
+                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
                         else:
-                            st.error(f"Code not found: {stock_name}")
+                            st.warning(f"No data for {stock_symbol}")
     else:
         st.info("👆 Select stocks to monitor")
 
+# TAB 4: PORTFOLIO
+with tab4:
+    st.header("📊 Your Portfolio")
+    
+    try:
+        kite = st.session_state.kite
+        
+        # Holdings
+        st.subheader("Holdings")
+        holdings = kite.holdings()
+        
+        if holdings:
+            df_holdings = pd.DataFrame(holdings)
+            
+            # Calculate totals
+            total_investment = sum(h.get('average_price', 0) * h.get('quantity', 0) for h in holdings)
+            total_current = sum(h.get('last_price', 0) * h.get('quantity', 0) for h in holdings)
+            total_pnl = total_current - total_investment
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Holdings", len(holdings))
+            with col2:
+                st.metric("Investment", f"₹{total_investment:,.2f}")
+            with col3:
+                st.metric("Current Value", f"₹{total_current:,.2f}")
+            with col4:
+                pnl_pct = (total_pnl / total_investment * 100) if total_investment > 0 else 0
+                st.metric("P&L", f"₹{total_pnl:,.2f}", f"{pnl_pct:.2f}%")
+            
+            # Display holdings table
+            display_cols = ['tradingsymbol', 'quantity', 'average_price', 'last_price', 'pnl']
+            if all(col in df_holdings.columns for col in display_cols):
+                st.dataframe(df_holdings[display_cols], use_container_width=True)
+        else:
+            st.info("No holdings found")
+        
+        st.markdown("---")
+        
+        # Positions
+        st.subheader("Positions")
+        positions = kite.positions()
+        
+        if positions:
+            net_positions = positions.get('net', [])
+            if net_positions:
+                df_positions = pd.DataFrame(net_positions)
+                st.dataframe(df_positions, use_container_width=True)
+            else:
+                st.info("No open positions")
+        
+        st.markdown("---")
+        
+        # Orders
+        st.subheader("Today's Orders")
+        orders = kite.orders()
+        
+        if orders:
+            df_orders = pd.DataFrame(orders)
+            display_cols = ['order_timestamp', 'tradingsymbol', 'transaction_type', 
+                           'quantity', 'price', 'status']
+            available_cols = [col for col in display_cols if col in df_orders.columns]
+            if available_cols:
+                st.dataframe(df_orders[available_cols], use_container_width=True)
+        else:
+            st.info("No orders today")
+        
+    except Exception as e:
+        st.error(f"Error fetching portfolio data: {e}")
+
 # Footer
 st.markdown("---")
-st.caption("💡 F&O Dashboard powered by ICICI Breeze API")
+st.caption("💡 F&O Dashboard powered by Zerodha Kite Connect API")
 st.caption("⚠ **Disclaimer:** For educational purposes only. Not financial advice.")
+st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
