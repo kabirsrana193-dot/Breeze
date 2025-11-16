@@ -1,6 +1,5 @@
-streamlit==1.28.0
+streamlit==1.29.0
+kiteconnect==4.3.0
+pandas==2.1.4
+plotly==5.18.0
 feedparser==6.0.10
-pandas==2.1.1
-numpy==1.24.3
-plotly==5.17.0
-breeze-connect==1.0.31
