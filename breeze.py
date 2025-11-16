@@ -1,7 +1,7 @@
 """
 Kite Connect F&O Trading Dashboard with WebSocket Live Streaming
 Real-time tick data using KiteTicker
-FIXED: Clean intraday charts without gaps + Better EMA/SMA visualization
+FIXED: Clean date labels without overlapping
 """
 
 import streamlit as st
@@ -296,7 +296,7 @@ def stop_websocket():
         pass
 
 # --------------------------
-# Technical Indicators (FIXED INTERVALS)
+# Technical Indicators
 # --------------------------
 def calculate_sma(data, period):
     """Calculate Simple Moving Average"""
@@ -462,7 +462,7 @@ with tab1:
             st.caption(f"Source: {article['Source']} | {article['Published']}")
             st.markdown("---")
 
-# TAB 2: CHARTS (FIXED - NO GAPS + BETTER EMA/SMA)
+# TAB 2: CHARTS - FIXED DATE LABELS
 with tab2:
     st.header("Stock Charts with Technical Indicators")
     st.caption("📊 EMA: 9, 21, 50 | SMA: 20, 50, 200 | Market Hours: 9:15 AM - 3:30 PM IST")
@@ -530,8 +530,8 @@ with tab2:
         
         st.markdown("---")
         
-        # 1. CANDLESTICK CHART (NO GAPS)
-        st.subheader(f"📊 {selected_stock} - Price Chart (Market Hours Only)")
+        # 1. CANDLESTICK CHART - FIXED DATE LABELS
+        st.subheader(f"📊 {selected_stock} - Price Chart")
         
         fig_candle = go.Figure()
         
@@ -554,7 +554,10 @@ with tab2:
             xaxis_rangeslider_visible=False,
             hovermode='x unified',
             xaxis=dict(
-                type='category' if interval != 'day' else 'date',  # Remove gaps
+                type='date',
+                tickformat='%d %b<br>%H:%M' if interval != 'day' else '%d %b %Y',
+                tickangle=-45,
+                nticks=15,
                 showgrid=True,
                 gridcolor='rgba(128,128,128,0.2)'
             ),
@@ -566,7 +569,7 @@ with tab2:
         
         st.plotly_chart(fig_candle, use_container_width=True)
         
-        # 2. EMA CHART (9, 21, 50) - SEPARATE FOR CLARITY
+        # 2. EMA CHART - FIXED DATE LABELS
         st.subheader("📈 Exponential Moving Averages (EMA 9, 21, 50)")
         
         fig_ema = go.Figure()
@@ -606,13 +609,18 @@ with tab2:
             height=450,
             hovermode='x unified',
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            xaxis=dict(type='category' if interval != 'day' else 'date'),
+            xaxis=dict(
+                type='date',
+                tickformat='%d %b<br>%H:%M' if interval != 'day' else '%d %b %Y',
+                tickangle=-45,
+                nticks=15
+            ),
             yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
         )
         
         st.plotly_chart(fig_ema, use_container_width=True)
         
-        # 3. SMA CHART (20, 50, 200) - SEPARATE FOR CLARITY
+        # 3. SMA CHART - FIXED DATE LABELS
         st.subheader("📉 Simple Moving Averages (SMA 20, 50, 200)")
         
         fig_sma = go.Figure()
@@ -654,13 +662,18 @@ with tab2:
             height=450,
             hovermode='x unified',
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            xaxis=dict(type='category' if interval != 'day' else 'date'),
+            xaxis=dict(
+                type='date',
+                tickformat='%d %b<br>%H:%M' if interval != 'day' else '%d %b %Y',
+                tickangle=-45,
+                nticks=15
+            ),
             yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
         )
         
         st.plotly_chart(fig_sma, use_container_width=True)
         
-        # 4. RSI
+        # 4. RSI - FIXED DATE LABELS
         st.subheader("📊 RSI (Relative Strength Index)")
         
         fig_rsi = go.Figure()
@@ -686,13 +699,18 @@ with tab2:
             xaxis_title="Time (IST)",
             height=300,
             hovermode='x unified',
-            xaxis=dict(type='category' if interval != 'day' else 'date'),
+            xaxis=dict(
+                type='date',
+                tickformat='%d %b<br>%H:%M' if interval != 'day' else '%d %b %Y',
+                tickangle=-45,
+                nticks=12
+            ),
             yaxis=dict(range=[0, 100], showgrid=True)
         )
         
         st.plotly_chart(fig_rsi, use_container_width=True)
         
-        # 5. MACD
+        # 5. MACD - FIXED DATE LABELS
         st.subheader("📈 MACD (Moving Average Convergence Divergence)")
         
         fig_macd = go.Figure()
@@ -724,7 +742,12 @@ with tab2:
             xaxis_title="Time (IST)",
             height=300,
             hovermode='x unified',
-            xaxis=dict(type='category' if interval != 'day' else 'date'),
+            xaxis=dict(
+                type='date',
+                tickformat='%d %b<br>%H:%M' if interval != 'day' else '%d %b %Y',
+                tickangle=-45,
+                nticks=12
+            ),
             yaxis=dict(showgrid=True)
         )
         
