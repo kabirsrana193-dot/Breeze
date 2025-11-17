@@ -621,15 +621,38 @@ with tab1:
     
     with col2:
         today = datetime.now(IST).date()
-        days_ahead = 3 - today.weekday()
+        
+        # Calculate next Tuesday (weekly expiry) - Tuesday is 1
+        days_ahead = 1 - today.weekday()
         if days_ahead <= 0:
             days_ahead += 7
         next_expiry = today + timedelta(days=days_ahead)
         
+        # Calculate monthly expiry (last Tuesday of current month)
+        # Get last day of current month
+        if today.month == 12:
+            last_day = today.replace(day=31)
+        else:
+            next_month = today.replace(month=today.month + 1, day=1)
+            last_day = next_month - timedelta(days=1)
+        
+        # Find last Tuesday
+        days_to_subtract = (last_day.weekday() - 1) % 7
+        monthly_expiry = last_day - timedelta(days=days_to_subtract)
+        
+        # Generate expiry list
         expiries = []
-        for i in range(4):
+        for i in range(5):
             expiry = next_expiry + timedelta(weeks=i)
             expiries.append(expiry.strftime("%Y-%m-%d"))
+        
+        # Add monthly expiry if not already in list
+        monthly_str = monthly_expiry.strftime("%Y-%m-%d")
+        if monthly_str not in expiries:
+            expiries.append(monthly_str)
+        
+        # Sort expiries
+        expiries = sorted(list(set(expiries)))
         
         selected_expiry = st.selectbox(
             "Expiry Date",
@@ -1075,7 +1098,7 @@ with tab2:
 # TAB 3: LIVE MONITOR
 with tab3:
     st.header("🔴 LIVE Intraday Monitor (WebSocket)")
-    st.caption("⏰ Market Hours: 9:15 AM - 3:30 PM IST | Auto-refresh every 3 seconds")
+    st.caption("⏰ Market Hours: 9:15 AM - 3:30 PM IST | Updates every 3 seconds")
     
     # Check market hours
     now = datetime.now(IST)
@@ -1083,7 +1106,7 @@ with tab3:
     market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
     is_market_open = market_open <= now <= market_close and now.weekday() < 5
     
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         watchlist = st.multiselect(
@@ -1100,28 +1123,43 @@ with tab3:
         else:
             st.error("❌ Market is CLOSED")
             if now.weekday() >= 5:
-                st.info("📅 Weekend - Market closed")
+                st.info("📅 Weekend")
             elif now < market_open:
-                st.info(f"⏰ Opens at 9:15 AM IST")
+                st.info(f"⏰ Opens at 9:15 AM")
             else:
-                st.info(f"⏰ Closed at 3:30 PM IST")
+                st.info(f"⏰ Closed at 3:30 PM")
     
-    if watchlist and is_market_open:
-        # Auto-start WebSocket
-        if not st.session_state.ticker_active:
-            with st.spinner("Starting live stream..."):
+    with col3:
+        if st.button("🔴 Start Live Stream", key="start_live_btn"):
+            if watchlist and is_market_open:
+                stop_websocket()  # Stop any existing connection
+                st.session_state.live_data = {}  # Clear old data
                 if start_websocket(watchlist):
-                    st.session_state.live_monitor_running = True
-                    time.sleep(2)
+                    st.success("✅ Connected!")
+                    time.sleep(1)
                     st.rerun()
+                else:
+                    st.error("❌ Failed to connect")
+            elif not watchlist:
+                st.warning("⚠️ Select stocks first")
+            else:
+                st.warning("⚠️ Market is closed")
         
-        if st.session_state.ticker_active:
-            st.success(f"🔴 LIVE: Streaming {len(watchlist)} stocks")
-            
-            # Auto-refresh every 3 seconds
-            time.sleep(3)
+        if st.button("⏹ Stop Stream", key="stop_live_btn"):
+            stop_websocket()
+            st.info("⏹ Stopped")
+            time.sleep(1)
             st.rerun()
-            
+    
+    st.markdown("---")
+    
+    if st.session_state.ticker_active and watchlist:
+        st.success(f"🔴 LIVE: Streaming {len(watchlist)} stocks")
+        
+        # Auto-refresh placeholder
+        placeholder = st.empty()
+        
+        with placeholder.container():
             # Display live data
             num_cols = 2 if len(watchlist) <= 4 else 3
             num_rows = (len(watchlist) + num_cols - 1) // num_cols
@@ -1154,22 +1192,17 @@ with tab3:
                                 st.caption(f"**O:** ₹{data['open']:.2f} | **H:** ₹{data['high']:.2f} | **L:** ₹{data['low']:.2f}")
                                 st.caption(f"⏱ {data['timestamp'].strftime('%H:%M:%S IST')}")
                             else:
-                                st.info(f"⏳ Waiting for {symbol} data...")
-            
-            # Stop button
-            st.markdown("---")
-            if st.button("⏹ Stop Stream", key="stop_live"):
-                stop_websocket()
-                st.session_state.live_monitor_running = False
-                st.info("Stream stopped")
-                time.sleep(1)
-                st.rerun()
+                                st.info(f"⏳ Connecting {symbol}...")
+        
+        # Auto-refresh after 3 seconds
+        time.sleep(3)
+        st.rerun()
     
     elif watchlist and not is_market_open:
-        st.warning("⚠️ Live streaming only works during market hours")
-        st.info("💡 The monitor will auto-start when you open this tab during market hours")
+        st.warning("⚠️ Live streaming only works during market hours (Mon-Fri, 9:15 AM - 3:30 PM IST)")
+        st.info("💡 Click 'Start Live Stream' button during market hours to begin")
     else:
-        st.info("👆 Select stocks to monitor")
+        st.info("👆 Select stocks and click 'Start Live Stream' button")
 
 # TAB 4: PORTFOLIO
 with tab4:
