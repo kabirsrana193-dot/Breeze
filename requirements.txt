@@ -4,3 +4,4 @@ pandas>=2.0.0
 plotly>=5.0.0
 feedparser>=6.0.0
 rich<14,>=10.14.0
+ytfinance
