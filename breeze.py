@@ -1,8 +1,13 @@
+"""
+Kite Connect F&O Trading Dashboard with WebSocket Live Streaming
+Real-time tick data using KiteTicker
+UPDATED: Options Chain instead of News Dashboard
+"""
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
-import feedparser
 from kiteconnect import KiteConnect, KiteTicker
 import time
 import threading
@@ -43,12 +48,6 @@ FNO_STOCKS = [
     "HINDUNILVR", "CIPLA", "DRREDDY", "DIVISLAB", "APOLLOHOSP"
 ]
 
-# RSS Feeds
-FINANCIAL_RSS_FEEDS = [
-    ("https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms", "ET Markets"),
-    ("https://www.moneycontrol.com/rss/latestnews.xml", "Moneycontrol"),
-]
-
 # --------------------------
 # Initialize session state
 # --------------------------
@@ -56,8 +55,6 @@ if 'kite' not in st.session_state:
     st.session_state.kite = None
 if 'kite_connected' not in st.session_state:
     st.session_state.kite_connected = False
-if 'news_articles' not in st.session_state:
-    st.session_state.news_articles = []
 if 'instruments_df' not in st.session_state:
     st.session_state.instruments_df = None
 if 'live_data' not in st.session_state:
@@ -95,14 +92,14 @@ if not st.session_state.kite_connected:
 def get_instruments():
     """Get and cache instruments list"""
     try:
-        instruments = st.session_state.kite.instruments("NSE")
+        instruments = st.session_state.kite.instruments("NFO")
         df = pd.DataFrame(instruments)
         return df
     except Exception as e:
         st.error(f"Error fetching instruments: {e}")
         return None
 
-def get_instrument_token(symbol):
+def get_instrument_token(symbol, exchange="NSE"):
     """Get instrument token for a symbol"""
     if st.session_state.instruments_df is None:
         st.session_state.instruments_df = get_instruments()
@@ -158,9 +155,15 @@ def fetch_historical_data(symbol, days=30, interval="day"):
         if not kite:
             return None
         
-        instrument_token = get_instrument_token(symbol)
-        if not instrument_token:
+        # Get instrument from NSE for spot data
+        instruments_nse = kite.instruments("NSE")
+        df_nse = pd.DataFrame(instruments_nse)
+        result = df_nse[df_nse['tradingsymbol'] == symbol]
+        
+        if result.empty:
             return None
+            
+        instrument_token = result.iloc[0]['instrument_token']
         
         to_date = datetime.now(IST)
         
@@ -213,13 +216,100 @@ def fetch_historical_data(symbol, days=30, interval="day"):
         st.error(f"Error: {e}")
         return None
 
+def get_spot_price(symbol):
+    """Get current spot price for a symbol"""
+    try:
+        kite = st.session_state.kite
+        instruments_nse = kite.instruments("NSE")
+        df_nse = pd.DataFrame(instruments_nse)
+        result = df_nse[df_nse['tradingsymbol'] == symbol]
+        
+        if result.empty:
+            return None
+        
+        instrument_token = result.iloc[0]['instrument_token']
+        quote = kite.quote(f"NSE:{symbol}")
+        
+        if quote and f"NSE:{symbol}" in quote:
+            return quote[f"NSE:{symbol}"]["last_price"]
+        return None
+    except Exception as e:
+        st.error(f"Error getting spot price: {e}")
+        return None
+
+def get_options_chain(symbol, expiry_date):
+    """Fetch options chain for a given symbol and expiry"""
+    try:
+        kite = st.session_state.kite
+        
+        # Get all NFO instruments
+        instruments_nfo = kite.instruments("NFO")
+        df_nfo = pd.DataFrame(instruments_nfo)
+        
+        # Filter for the selected symbol and expiry
+        expiry_dt = datetime.strptime(expiry_date, "%Y-%m-%d").date()
+        
+        options_data = df_nfo[
+            (df_nfo['name'] == symbol) & 
+            (df_nfo['expiry'] == expiry_dt) &
+            (df_nfo['instrument_type'].isin(['CE', 'PE']))
+        ].copy()
+        
+        if options_data.empty:
+            return None
+        
+        # Get quotes for all options
+        symbols_list = [f"NFO:{ts}" for ts in options_data['tradingsymbol'].tolist()]
+        
+        # Split into chunks of 500 (Kite API limit)
+        chunk_size = 500
+        all_quotes = {}
+        
+        for i in range(0, len(symbols_list), chunk_size):
+            chunk = symbols_list[i:i + chunk_size]
+            quotes = kite.quote(chunk)
+            all_quotes.update(quotes)
+        
+        # Add quote data to options dataframe
+        options_data['ltp'] = options_data['tradingsymbol'].apply(
+            lambda x: all_quotes.get(f"NFO:{x}", {}).get('last_price', 0)
+        )
+        options_data['volume'] = options_data['tradingsymbol'].apply(
+            lambda x: all_quotes.get(f"NFO:{x}", {}).get('volume', 0)
+        )
+        options_data['oi'] = options_data['tradingsymbol'].apply(
+            lambda x: all_quotes.get(f"NFO:{x}", {}).get('oi', 0)
+        )
+        options_data['bid'] = options_data['tradingsymbol'].apply(
+            lambda x: all_quotes.get(f"NFO:{x}", {}).get('depth', {}).get('buy', [{}])[0].get('price', 0) if all_quotes.get(f"NFO:{x}", {}).get('depth') else 0
+        )
+        options_data['ask'] = options_data['tradingsymbol'].apply(
+            lambda x: all_quotes.get(f"NFO:{x}", {}).get('depth', {}).get('sell', [{}])[0].get('price', 0) if all_quotes.get(f"NFO:{x}", {}).get('depth') else 0
+        )
+        
+        return options_data
+        
+    except Exception as e:
+        st.error(f"Error fetching options chain: {e}")
+        return None
+
 # --------------------------
 # WebSocket Functions
 # --------------------------
 def start_websocket(symbols):
     """Start WebSocket connection for live data"""
     try:
-        tokens_map = get_instrument_tokens(symbols)
+        # Get tokens from NSE for spot prices
+        kite = st.session_state.kite
+        instruments_nse = kite.instruments("NSE")
+        df_nse = pd.DataFrame(instruments_nse)
+        
+        tokens_map = {}
+        for symbol in symbols:
+            result = df_nse[df_nse['tradingsymbol'] == symbol]
+            if not result.empty:
+                tokens_map[symbol] = result.iloc[0]['instrument_token']
+        
         if not tokens_map:
             st.error("Could not get instrument tokens")
             return
@@ -373,63 +463,190 @@ def calculate_supertrend(df, period=10, multiplier=3):
     
     return supertrend, direction
 
-# --------------------------
-# Sentiment Analysis
-# --------------------------
-def analyze_sentiment(text):
-    POSITIVE = ['surge', 'rally', 'gain', 'profit', 'growth', 'rise', 'bullish', 
-                'strong', 'beats', 'outperform', 'jumps', 'soars', 'upgrade']
-    NEGATIVE = ['fall', 'drop', 'loss', 'decline', 'weak', 'crash', 'bearish',
-                'concern', 'risk', 'plunge', 'slump', 'miss', 'downgrade']
+def calculate_ichimoku(df):
+    """Calculate Ichimoku Cloud"""
+    # Tenkan-sen (Conversion Line): (9-period high + 9-period low)/2
+    period9_high = df['high'].rolling(window=9).max()
+    period9_low = df['low'].rolling(window=9).min()
+    tenkan_sen = (period9_high + period9_low) / 2
     
-    text_lower = text.lower()
-    pos_count = sum(1 for w in POSITIVE if w in text_lower)
-    neg_count = sum(1 for w in NEGATIVE if w in text_lower)
+    # Kijun-sen (Base Line): (26-period high + 26-period low)/2
+    period26_high = df['high'].rolling(window=26).max()
+    period26_low = df['low'].rolling(window=26).min()
+    kijun_sen = (period26_high + period26_low) / 2
     
-    if pos_count > neg_count:
-        return "positive", min(0.6 + pos_count * 0.1, 0.95)
-    elif neg_count > pos_count:
-        return "negative", min(0.6 + neg_count * 0.1, 0.95)
-    else:
-        return "neutral", 0.5
+    # Senkou Span A (Leading Span A): (Conversion Line + Base Line)/2
+    senkou_span_a = ((tenkan_sen + kijun_sen) / 2).shift(26)
+    
+    # Senkou Span B (Leading Span B): (52-period high + 52-period low)/2
+    period52_high = df['high'].rolling(window=52).max()
+    period52_low = df['low'].rolling(window=52).min()
+    senkou_span_b = ((period52_high + period52_low) / 2).shift(26)
+    
+    # Chikou Span (Lagging Span): Current closing price shifted back 26 periods
+    chikou_span = df['close'].shift(-26)
+    
+    return tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span
 
-def fetch_news(num_articles=12, specific_stock=None):
-    all_articles = []
-    seen_titles = set()
+def calculate_fibonacci_levels(df, lookback=50):
+    """Calculate Fibonacci Retracement levels"""
+    recent_data = df.tail(lookback)
+    high = recent_data['high'].max()
+    low = recent_data['low'].min()
+    diff = high - low
     
-    for feed_url, source_name in FINANCIAL_RSS_FEEDS:
-        try:
-            feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:15]:
-                title = getattr(entry, 'title', '')
-                if not title or title in seen_titles:
-                    continue
-                
-                if specific_stock and specific_stock != "All Stocks":
-                    if specific_stock.upper() not in title.upper():
-                        continue
-                
-                sentiment, score = analyze_sentiment(title)
-                
-                all_articles.append({
-                    "Title": title,
-                    "Source": source_name,
-                    "Sentiment": sentiment,
-                    "Score": score,
-                    "Link": entry.link,
-                    "Published": getattr(entry, 'published', 'Recent')
-                })
-                seen_titles.add(title)
-                
-                if len(all_articles) >= num_articles:
-                    break
-        except:
-            continue
+    levels = {
+        '0.0': high,
+        '0.236': high - 0.236 * diff,
+        '0.382': high - 0.382 * diff,
+        '0.5': high - 0.5 * diff,
+        '0.618': high - 0.618 * diff,
+        '0.786': high - 0.786 * diff,
+        '1.0': low
+    }
+    
+    return levels, high, low
+
+def calculate_obv(df):
+    """Calculate On-Balance Volume"""
+    obv = pd.Series(index=df.index, dtype=float)
+    obv.iloc[0] = df['volume'].iloc[0]
+    
+    for i in range(1, len(df)):
+        if df['close'].iloc[i] > df['close'].iloc[i-1]:
+            obv.iloc[i] = obv.iloc[i-1] + df['volume'].iloc[i]
+        elif df['close'].iloc[i] < df['close'].iloc[i-1]:
+            obv.iloc[i] = obv.iloc[i-1] - df['volume'].iloc[i]
+        else:
+            obv.iloc[i] = obv.iloc[i-1]
+    
+    return obv
+
+def calculate_cmf(df, period=20):
+    """Calculate Chaikin Money Flow"""
+    mfm = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low'])
+    mfm = mfm.fillna(0)
+    mfv = mfm * df['volume']
+    cmf = mfv.rolling(window=period).sum() / df['volume'].rolling(window=period).sum()
+    return cmf
+
+def detect_candlestick_patterns(df):
+    """Detect common candlestick patterns"""
+    patterns = []
+    
+    if len(df) < 3:
+        return patterns
+    
+    # Get last 3 candles
+    current = df.iloc[-1]
+    prev1 = df.iloc[-2]
+    prev2 = df.iloc[-3] if len(df) >= 3 else None
+    
+    body_current = abs(current['close'] - current['open'])
+    body_prev1 = abs(prev1['close'] - prev1['open'])
+    
+    # Doji
+    if body_current < (current['high'] - current['low']) * 0.1:
+        patterns.append(("Doji", "Neutral", "Indecision in market"))
+    
+    # Hammer
+    lower_shadow = current['open'] - current['low'] if current['close'] > current['open'] else current['close'] - current['low']
+    upper_shadow = current['high'] - current['close'] if current['close'] > current['open'] else current['high'] - current['open']
+    
+    if lower_shadow > body_current * 2 and upper_shadow < body_current * 0.3:
+        if current['close'] < prev1['close']:
+            patterns.append(("Hammer", "Bullish", "Potential reversal at bottom"))
+    
+    # Shooting Star
+    if upper_shadow > body_current * 2 and lower_shadow < body_current * 0.3:
+        if current['close'] > prev1['close']:
+            patterns.append(("Shooting Star", "Bearish", "Potential reversal at top"))
+    
+    # Bullish Engulfing
+    if (current['close'] > current['open'] and 
+        prev1['close'] < prev1['open'] and
+        current['open'] < prev1['close'] and
+        current['close'] > prev1['open']):
+        patterns.append(("Bullish Engulfing", "Bullish", "Strong reversal signal"))
+    
+    # Bearish Engulfing
+    if (current['close'] < current['open'] and 
+        prev1['close'] > prev1['open'] and
+        current['open'] > prev1['close'] and
+        current['close'] < prev1['open']):
+        patterns.append(("Bearish Engulfing", "Bearish", "Strong reversal signal"))
+    
+    # Morning Star (3 candle pattern)
+    if prev2 is not None:
+        body_prev2 = abs(prev2['close'] - prev2['open'])
+        if (prev2['close'] < prev2['open'] and  # First candle bearish
+            body_prev1 < body_prev2 * 0.3 and  # Second candle small
+            current['close'] > current['open'] and  # Third candle bullish
+            current['close'] > (prev2['open'] + prev2['close']) / 2):
+            patterns.append(("Morning Star", "Bullish", "Strong reversal pattern"))
+    
+    # Evening Star (3 candle pattern)
+    if prev2 is not None:
+        body_prev2 = abs(prev2['close'] - prev2['open'])
+        if (prev2['close'] > prev2['open'] and  # First candle bullish
+            body_prev1 < body_prev2 * 0.3 and  # Second candle small
+            current['close'] < current['open'] and  # Third candle bearish
+            current['close'] < (prev2['open'] + prev2['close']) / 2):
+            patterns.append(("Evening Star", "Bearish", "Strong reversal pattern"))
+    
+    return patterns
+
+def detect_chart_patterns(df, window=20):
+    """Detect common chart patterns"""
+    patterns = []
+    
+    if len(df) < window:
+        return patterns
+    
+    recent = df.tail(window)
+    highs = recent['high']
+    lows = recent['low']
+    closes = recent['close']
+    
+    # Head and Shoulders (simplified detection)
+    if len(recent) >= 5:
+        mid_point = len(recent) // 2
+        left_shoulder = highs.iloc[:mid_point-1].max()
+        head = highs.iloc[mid_point-1:mid_point+2].max()
+        right_shoulder = highs.iloc[mid_point+2:].max()
         
-        if len(all_articles) >= num_articles:
-            break
+        if head > left_shoulder * 1.02 and head > right_shoulder * 1.02:
+            if abs(left_shoulder - right_shoulder) / left_shoulder < 0.02:
+                patterns.append(("Head & Shoulders", "Bearish", "Major reversal pattern"))
     
-    return all_articles[:num_articles]
+    # Double Top/Bottom
+    peaks = []
+    for i in range(2, len(recent)-2):
+        if (highs.iloc[i] > highs.iloc[i-1] and highs.iloc[i] > highs.iloc[i-2] and
+            highs.iloc[i] > highs.iloc[i+1] and highs.iloc[i] > highs.iloc[i+2]):
+            peaks.append((i, highs.iloc[i]))
+    
+    if len(peaks) >= 2:
+        last_two_peaks = peaks[-2:]
+        if abs(last_two_peaks[0][1] - last_two_peaks[1][1]) / last_two_peaks[0][1] < 0.02:
+            patterns.append(("Double Top", "Bearish", "Reversal pattern"))
+    
+    # Triangle Pattern (simple detection)
+    recent_highs = highs.tail(10)
+    recent_lows = lows.tail(10)
+    
+    high_trend = (recent_highs.iloc[-1] - recent_highs.iloc[0]) / recent_highs.iloc[0]
+    low_trend = (recent_lows.iloc[-1] - recent_lows.iloc[0]) / recent_lows.iloc[0]
+    
+    if abs(high_trend) < 0.02 and low_trend > 0.03:
+        patterns.append(("Ascending Triangle", "Bullish", "Continuation pattern"))
+    elif high_trend < -0.03 and abs(low_trend) < 0.02:
+        patterns.append(("Descending Triangle", "Bearish", "Continuation pattern"))
+    elif abs(high_trend) < 0.02 and abs(low_trend) < 0.02:
+        if (recent_highs.max() - recent_lows.min()) / recent_lows.min() < 0.05:
+            patterns.append(("Symmetrical Triangle", "Neutral", "Breakout expected"))
+    
+    return patterns
 
 # --------------------------
 # Streamlit App
@@ -455,65 +672,251 @@ else:
 st.markdown("---")
 
 # Main tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📰 News", "💹 Charts & Indicators", "🔴 LIVE Monitor", "📊 Portfolio"])
+tab1, tab2, tab3, tab4 = st.tabs(["⚡ Options Chain", "💹 Charts & Indicators", "🔴 LIVE Monitor", "📊 Portfolio"])
 
-# TAB 1: NEWS
+# TAB 1: OPTIONS CHAIN
 with tab1:
-    st.header("Market News & Sentiment")
+    st.header("⚡ Options Chain Analysis")
+    st.caption("📊 Real-time Call & Put Options Data | Market Hours: 9:15 AM - 3:30 PM IST")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        stock_filter = st.selectbox(
-            "Filter by Stock",
-            ["All Stocks"] + FNO_STOCKS,
-            key="news_filter"
+        selected_stock_oc = st.selectbox(
+            "Select Stock",
+            FNO_STOCKS,
+            key="options_stock"
         )
     
     with col2:
-        if st.button("🔄 Refresh News", key="refresh_news"):
-            st.session_state.news_articles = fetch_news(12, stock_filter)
-            st.success("News refreshed!")
+        # Get current date and calculate expiries
+        today = datetime.now(IST).date()
+        
+        # Calculate next Thursday (weekly expiry)
+        days_ahead = 3 - today.weekday()  # Thursday is 3
+        if days_ahead <= 0:
+            days_ahead += 7
+        next_expiry = today + timedelta(days=days_ahead)
+        
+        # Generate next few weekly expiries
+        expiries = []
+        for i in range(4):
+            expiry = next_expiry + timedelta(weeks=i)
+            expiries.append(expiry.strftime("%Y-%m-%d"))
+        
+        selected_expiry = st.selectbox(
+            "Expiry Date",
+            expiries,
+            format_func=lambda x: datetime.strptime(x, "%Y-%m-%d").strftime("%d %b %Y"),
+            key="options_expiry"
+        )
     
-    if not st.session_state.news_articles:
-        with st.spinner("Loading news..."):
-            st.session_state.news_articles = fetch_news(12, stock_filter)
+    with col3:
+        if st.button("🔄 Refresh Options Data", key="refresh_options"):
+            st.cache_data.clear()
+            st.rerun()
     
-    if st.session_state.news_articles:
-        df_news = pd.DataFrame(st.session_state.news_articles)
+    # Get spot price
+    with st.spinner(f"Loading options chain for {selected_stock_oc}..."):
+        spot_price = get_spot_price(selected_stock_oc)
         
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total", len(df_news))
-        with col2:
-            st.metric("🟢 Positive", len(df_news[df_news['Sentiment'] == 'positive']))
-        with col3:
-            st.metric("⚪ Neutral", len(df_news[df_news['Sentiment'] == 'neutral']))
-        with col4:
-            st.metric("🔴 Negative", len(df_news[df_news['Sentiment'] == 'negative']))
-        
-        st.markdown("---")
-        
-        for article in st.session_state.news_articles:
-            sentiment_colors = {"positive": "#28a745", "neutral": "#6c757d", "negative": "#dc3545"}
-            sentiment_emoji = {"positive": "🟢", "neutral": "⚪", "negative": "🔴"}
+        if spot_price:
+            st.info(f"💹 **Spot Price:** ₹{spot_price:.2f}")
             
-            st.markdown(f"[{article['Title']}]({article['Link']})")
-            st.markdown(
-                f"<span style='background-color: {sentiment_colors[article['Sentiment']]}; "
-                f"color: white; padding: 3px 10px; border-radius: 4px; font-size: 11px;'>"
-                f"{sentiment_emoji[article['Sentiment']]} {article['Sentiment'].upper()}</span>",
-                unsafe_allow_html=True
-            )
-            st.caption(f"Source: {article['Source']} | {article['Published']}")
-            st.markdown("---")
+            # Fetch options chain
+            options_df = get_options_chain(selected_stock_oc, selected_expiry)
+            
+            if options_df is not None and not options_df.empty:
+                # Separate CE and PE
+                ce_data = options_df[options_df['instrument_type'] == 'CE'].copy()
+                pe_data = options_df[options_df['instrument_type'] == 'PE'].copy()
+                
+                # Sort by strike
+                ce_data = ce_data.sort_values('strike')
+                pe_data = pe_data.sort_values('strike')
+                
+                # Get unique strikes
+                strikes = sorted(options_df['strike'].unique())
+                
+                # Filter strikes around spot (±10 strikes)
+                spot_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot_price))
+                start_idx = max(0, spot_idx - 10)
+                end_idx = min(len(strikes), spot_idx + 11)
+                filtered_strikes = strikes[start_idx:end_idx]
+                
+                # Summary metrics
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    total_ce_oi = ce_data[ce_data['strike'].isin(filtered_strikes)]['oi'].sum()
+                    st.metric("Total CALL OI", f"{total_ce_oi:,.0f}")
+                
+                with col2:
+                    total_pe_oi = pe_data[pe_data['strike'].isin(filtered_strikes)]['oi'].sum()
+                    st.metric("Total PUT OI", f"{total_pe_oi:,.0f}")
+                
+                with col3:
+                    pcr = total_pe_oi / total_ce_oi if total_ce_oi > 0 else 0
+                    st.metric("Put-Call Ratio", f"{pcr:.2f}")
+                
+                with col4:
+                    atm_strike = min(strikes, key=lambda x: abs(x - spot_price))
+                    st.metric("ATM Strike", f"₹{atm_strike:.0f}")
+                
+                st.markdown("---")
+                
+                # Create options chain table
+                st.subheader(f"Options Chain - {selected_stock_oc} (Expiry: {datetime.strptime(selected_expiry, '%Y-%m-%d').strftime('%d %b %Y')})")
+                
+                # Build the options chain display
+                chain_data = []
+                
+                for strike in filtered_strikes:
+                    ce_row = ce_data[ce_data['strike'] == strike]
+                    pe_row = pe_data[pe_data['strike'] == strike]
+                    
+                    row = {
+                        'CE_OI': ce_row['oi'].values[0] if not ce_row.empty else 0,
+                        'CE_Volume': ce_row['volume'].values[0] if not ce_row.empty else 0,
+                        'CE_LTP': ce_row['ltp'].values[0] if not ce_row.empty else 0,
+                        'CE_Bid': ce_row['bid'].values[0] if not ce_row.empty else 0,
+                        'CE_Ask': ce_row['ask'].values[0] if not ce_row.empty else 0,
+                        'Strike': strike,
+                        'PE_Bid': pe_row['bid'].values[0] if not pe_row.empty else 0,
+                        'PE_Ask': pe_row['ask'].values[0] if not pe_row.empty else 0,
+                        'PE_LTP': pe_row['ltp'].values[0] if not pe_row.empty else 0,
+                        'PE_Volume': pe_row['volume'].values[0] if not pe_row.empty else 0,
+                        'PE_OI': pe_row['oi'].values[0] if not pe_row.empty else 0,
+                    }
+                    chain_data.append(row)
+                
+                chain_df = pd.DataFrame(chain_data)
+                
+                # Highlight ATM strike
+                def highlight_atm(row):
+                    if row['Strike'] == atm_strike:
+                        return ['background-color: #ffffcc'] * len(row)
+                    return [''] * len(row)
+                
+                # Display the chain
+                st.dataframe(
+                    chain_df.style.apply(highlight_atm, axis=1).format({
+                        'CE_OI': '{:,.0f}',
+                        'CE_Volume': '{:,.0f}',
+                        'CE_LTP': '₹{:.2f}',
+                        'CE_Bid': '₹{:.2f}',
+                        'CE_Ask': '₹{:.2f}',
+                        'Strike': '₹{:.0f}',
+                        'PE_Bid': '₹{:.2f}',
+                        'PE_Ask': '₹{:.2f}',
+                        'PE_LTP': '₹{:.2f}',
+                        'PE_Volume': '{:,.0f}',
+                        'PE_OI': '{:,.0f}'
+                    }),
+                    use_container_width=True,
+                    height=600
+                )
+                
+                st.caption("💡 **ATM Strike** is highlighted in yellow | Higher OI indicates strong support/resistance")
+                
+                # OI Chart
+                st.markdown("---")
+                st.subheader("📊 Open Interest Distribution")
+                
+                fig_oi = go.Figure()
+                
+                fig_oi.add_trace(go.Bar(
+                    x=chain_df['Strike'],
+                    y=chain_df['CE_OI'],
+                    name='CALL OI',
+                    marker_color='#ef5350',
+                    opacity=0.7
+                ))
+                
+                fig_oi.add_trace(go.Bar(
+                    x=chain_df['Strike'],
+                    y=chain_df['PE_OI'],
+                    name='PUT OI',
+                    marker_color='#26a69a',
+                    opacity=0.7
+                ))
+                
+                # Add spot price line
+                fig_oi.add_vline(
+                    x=spot_price,
+                    line_dash="dash",
+                    line_color="blue",
+                    annotation_text=f"Spot: ₹{spot_price:.2f}",
+                    annotation_position="top"
+                )
+                
+                fig_oi.update_layout(
+                    title="Call vs Put Open Interest",
+                    xaxis_title="Strike Price (₹)",
+                    yaxis_title="Open Interest",
+                    height=400,
+                    barmode='group',
+                    hovermode='x unified',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                
+                st.plotly_chart(fig_oi, use_container_width=True)
+                
+                # Volume Chart
+                st.subheader("📊 Volume Distribution")
+                
+                fig_vol = go.Figure()
+                
+                fig_vol.add_trace(go.Bar(
+                    x=chain_df['Strike'],
+                    y=chain_df['CE_Volume'],
+                    name='CALL Volume',
+                    marker_color='#ff9800',
+                    opacity=0.7
+                ))
+                
+                fig_vol.add_trace(go.Bar(
+                    x=chain_df['Strike'],
+                    y=chain_df['PE_Volume'],
+                    name='PUT Volume',
+                    marker_color='#2196f3',
+                    opacity=0.7
+                ))
+                
+                # Add spot price line
+                fig_vol.add_vline(
+                    x=spot_price,
+                    line_dash="dash",
+                    line_color="blue",
+                    annotation_text=f"Spot: ₹{spot_price:.2f}",
+                    annotation_position="top"
+                )
+                
+                fig_vol.update_layout(
+                    title="Call vs Put Volume",
+                    xaxis_title="Strike Price (₹)",
+                    yaxis_title="Volume",
+                    height=400,
+                    barmode='group',
+                    hovermode='x unified',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                
+                st.plotly_chart(fig_vol, use_container_width=True)
+                
+            else:
+                st.warning(f"❌ No options data available for {selected_stock_oc} with expiry {selected_expiry}")
+                st.info("💡 Try selecting a different expiry date or stock")
+        else:
+            st.error("❌ Unable to fetch spot price")
+            st.info("💡 Make sure the market is open or try again later")
 
 # TAB 2: CHARTS - COMBINED MA CHART
 with tab2:
     st.header("Stock Charts with Technical Indicators")
-    st.caption("📊 EMA: 9, 21, 50 | SMA: 20, 50, 200 | BB: 20,2 | Supertrend: 10,3 | Market Hours: 9:15 AM - 3:30 PM IST")
+    st.caption("📊 Advanced charting with Ichimoku, Fibonacci, Volume indicators & Pattern Recognition")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         selected_stock = st.selectbox("Select Stock", FNO_STOCKS, key="chart_stock")
@@ -535,6 +938,13 @@ with tab2:
                 "5minute": "5 Min"
             }[x],
             key="chart_interval"
+        )
+    
+    with col4:
+        chart_type = st.selectbox(
+            "Chart Type",
+            ["Candlestick + MA", "Ichimoku Cloud", "Fibonacci", "Volume Analysis"],
+            key="chart_type"
         )
     
     # Limit days for intraday intervals
@@ -560,6 +970,15 @@ with tab2:
         df['BB_upper'], df['BB_middle'], df['BB_lower'] = calculate_bollinger_bands(df['close'])
         df['Supertrend'], df['ST_direction'] = calculate_supertrend(df)
         
+        # Advanced indicators
+        df['Tenkan'], df['Kijun'], df['SpanA'], df['SpanB'], df['Chikou'] = calculate_ichimoku(df)
+        df['OBV'] = calculate_obv(df)
+        df['CMF'] = calculate_cmf(df)
+        
+        # Pattern detection
+        candlestick_patterns = detect_candlestick_patterns(df)
+        chart_patterns = detect_chart_patterns(df)
+        
         # Current metrics
         current = df['close'].iloc[-1]
         prev = df['close'].iloc[0]
@@ -576,12 +995,32 @@ with tab2:
         with col4:
             st.metric("Low", f"₹{df['low'].min():.2f}")
         
+        # Pattern Recognition Display
+        if candlestick_patterns or chart_patterns:
+            st.markdown("---")
+            st.subheader("🎯 Pattern Recognition")
+            
+            if candlestick_patterns:
+                st.markdown("**📊 Candlestick Patterns Detected:**")
+                cols = st.columns(len(candlestick_patterns))
+                for idx, (pattern_name, signal, description) in enumerate(candlestick_patterns):
+                    with cols[idx]:
+                        color = "🟢" if signal == "Bullish" else "🔴" if signal == "Bearish" else "⚪"
+                        st.markdown(f"{color} **{pattern_name}**")
+                        st.caption(f"{signal} - {description}")
+            
+            if chart_patterns:
+                st.markdown("**📈 Chart Patterns Detected:**")
+                cols = st.columns(len(chart_patterns))
+                for idx, (pattern_name, signal, description) in enumerate(chart_patterns):
+                    with cols[idx]:
+                        color = "🟢" if signal == "Bullish" else "🔴" if signal == "Bearish" else "⚪"
+                        st.markdown(f"{color} **{pattern_name}**")
+                        st.caption(f"{signal} - {description}")
+        
         st.markdown("---")
         
-        # 1. CANDLESTICK CHART WITH EMA & SMA - BIGGER SIZE
-        st.subheader(f"📊 {selected_stock} - Price Chart with Moving Averages")
-        
-        # Format datetime index as strings to remove gaps
+        # Format datetime index
         if interval != 'day':
             df_plot = df.copy()
             df_plot.index = df_plot.index.strftime('%d %b %H:%M')
@@ -594,99 +1033,329 @@ with tab2:
             xaxis_type = 'date'
             tickformat = '%d %b %Y'
         
-        fig_candle = go.Figure()
-        
-        # Candlesticks
-        fig_candle.add_trace(go.Candlestick(
-            x=x_data,
-            open=df_plot['open'],
-            high=df_plot['high'],
-            low=df_plot['low'],
-            close=df_plot['close'],
-            name='Price',
-            increasing_line_color='#26a69a',
-            decreasing_line_color='#ef5350'
-        ))
-        
-        # EMA Lines
-        fig_candle.add_trace(go.Scatter(
-            x=x_data, y=df_plot['EMA_9'],
-            name='EMA 9',
-            line=dict(color='#4CAF50', width=1.5),
-            mode='lines'
-        ))
-        
-        fig_candle.add_trace(go.Scatter(
-            x=x_data, y=df_plot['EMA_21'],
-            name='EMA 21',
-            line=dict(color='#FF9800', width=1.5),
-            mode='lines'
-        ))
-        
-        fig_candle.add_trace(go.Scatter(
-            x=x_data, y=df_plot['EMA_50'],
-            name='EMA 50',
-            line=dict(color='#9C27B0', width=1.5),
-            mode='lines'
-        ))
-        
-        # SMA Lines
-        fig_candle.add_trace(go.Scatter(
-            x=x_data, y=df_plot['SMA_20'],
-            name='SMA 20',
-            line=dict(color='#FF5722', width=1.5, dash='dash'),
-            mode='lines'
-        ))
-        
-        fig_candle.add_trace(go.Scatter(
-            x=x_data, y=df_plot['SMA_50'],
-            name='SMA 50',
-            line=dict(color='#FFC107', width=1.5, dash='dash'),
-            mode='lines'
-        ))
-        
-        # Only show SMA 200 if we have enough data
-        if len(df_plot) >= 200:
+        # MAIN CHART BASED ON SELECTION
+        if chart_type == "Candlestick + MA":
+            st.subheader(f"📊 {selected_stock} - Price Chart with Moving Averages")
+            
+            fig_candle = go.Figure()
+            
+            # Candlesticks
+            fig_candle.add_trace(go.Candlestick(
+                x=x_data,
+                open=df_plot['open'],
+                high=df_plot['high'],
+                low=df_plot['low'],
+                close=df_plot['close'],
+                name='Price',
+                increasing_line_color='#26a69a',
+                decreasing_line_color='#ef5350'
+            ))
+            
+            # EMA Lines
             fig_candle.add_trace(go.Scatter(
-                x=x_data, y=df_plot['SMA_200'],
-                name='SMA 200',
-                line=dict(color='#795548', width=2, dash='dash'),
+                x=x_data, y=df_plot['EMA_9'],
+                name='EMA 9',
+                line=dict(color='#4CAF50', width=1.5),
                 mode='lines'
             ))
-        
-        fig_candle.update_layout(
-            title=f"{selected_stock} - {interval.upper()} Chart with Moving Averages",
-            yaxis_title="Price (₹)",
-            xaxis_title="Time (IST)",
-            height=650,
-            xaxis_rangeslider_visible=False,
-            hovermode='x unified',
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1,
-                bgcolor="rgba(255, 255, 255, 0.8)",
-                bordercolor="gray",
-                borderwidth=1
-            ),
-            xaxis=dict(
-                type=xaxis_type,
-                tickformat=tickformat,
-                tickangle=-45,
-                nticks=15,
-                showgrid=True,
-                gridcolor='rgba(128,128,128,0.2)'
-            ),
-            yaxis=dict(
-                showgrid=True,
-                gridcolor='rgba(128,128,128,0.2)'
+            
+            fig_candle.add_trace(go.Scatter(
+                x=x_data, y=df_plot['EMA_21'],
+                name='EMA 21',
+                line=dict(color='#FF9800', width=1.5),
+                mode='lines'
+            ))
+            
+            fig_candle.add_trace(go.Scatter(
+                x=x_data, y=df_plot['EMA_50'],
+                name='EMA 50',
+                line=dict(color='#9C27B0', width=1.5),
+                mode='lines'
+            ))
+            
+            # SMA Lines
+            fig_candle.add_trace(go.Scatter(
+                x=x_data, y=df_plot['SMA_20'],
+                name='SMA 20',
+                line=dict(color='#FF5722', width=1.5, dash='dash'),
+                mode='lines'
+            ))
+            
+            fig_candle.add_trace(go.Scatter(
+                x=x_data, y=df_plot['SMA_50'],
+                name='SMA 50',
+                line=dict(color='#FFC107', width=1.5, dash='dash'),
+                mode='lines'
+            ))
+            
+            if len(df_plot) >= 200:
+                fig_candle.add_trace(go.Scatter(
+                    x=x_data, y=df_plot['SMA_200'],
+                    name='SMA 200',
+                    line=dict(color='#795548', width=2, dash='dash'),
+                    mode='lines'
+                ))
+            
+            fig_candle.update_layout(
+                title=f"{selected_stock} - Candlestick Chart with Moving Averages",
+                yaxis_title="Price (₹)",
+                xaxis_title="Time (IST)",
+                height=650,
+                xaxis_rangeslider_visible=False,
+                hovermode='x unified',
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    bgcolor="rgba(255, 255, 255, 0.8)",
+                    bordercolor="gray",
+                    borderwidth=1
+                ),
+                xaxis=dict(
+                    type=xaxis_type,
+                    tickformat=tickformat,
+                    tickangle=-45,
+                    nticks=15,
+                    showgrid=True,
+                    gridcolor='rgba(128,128,128,0.2)'
+                ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridcolor='rgba(128,128,128,0.2)'
+                )
             )
-        )
+            
+            st.plotly_chart(fig_candle, use_container_width=True)
+            st.info("💡 **Tip:** EMA lines (solid) react faster to price changes than SMA lines (dashed)")
         
-        st.plotly_chart(fig_candle, use_container_width=True)
-        st.info("💡 **Tip:** Click legend items to show/hide individual moving averages. EMA lines are solid, SMA lines are dashed.")
+        elif chart_type == "Ichimoku Cloud":
+            st.subheader(f"☁️ {selected_stock} - Ichimoku Cloud")
+            
+            fig_ichi = go.Figure()
+            
+            # Candlesticks
+            fig_ichi.add_trace(go.Candlestick(
+                x=x_data,
+                open=df_plot['open'],
+                high=df_plot['high'],
+                low=df_plot['low'],
+                close=df_plot['close'],
+                name='Price',
+                increasing_line_color='#26a69a',
+                decreasing_line_color='#ef5350'
+            ))
+            
+            # Tenkan-sen (Conversion Line)
+            fig_ichi.add_trace(go.Scatter(
+                x=x_data, y=df_plot['Tenkan'],
+                name='Tenkan-sen (9)',
+                line=dict(color='#FF6B6B', width=1.5),
+                mode='lines'
+            ))
+            
+            # Kijun-sen (Base Line)
+            fig_ichi.add_trace(go.Scatter(
+                x=x_data, y=df_plot['Kijun'],
+                name='Kijun-sen (26)',
+                line=dict(color='#4ECDC4', width=1.5),
+                mode='lines'
+            ))
+            
+            # Senkou Span A (Leading Span A) - Cloud
+            fig_ichi.add_trace(go.Scatter(
+                x=x_data, y=df_plot['SpanA'],
+                name='Senkou Span A',
+                line=dict(color='rgba(0, 255, 0, 0.3)', width=0.5),
+                mode='lines',
+                showlegend=True
+            ))
+            
+            # Senkou Span B (Leading Span B) - Cloud
+            fig_ichi.add_trace(go.Scatter(
+                x=x_data, y=df_plot['SpanB'],
+                name='Senkou Span B',
+                line=dict(color='rgba(255, 0, 0, 0.3)', width=0.5),
+                fill='tonexty',
+                fillcolor='rgba(124, 252, 0, 0.2)',
+                mode='lines',
+                showlegend=True
+            ))
+            
+            # Chikou Span (Lagging Span)
+            fig_ichi.add_trace(go.Scatter(
+                x=x_data, y=df_plot['Chikou'],
+                name='Chikou Span',
+                line=dict(color='#9B59B6', width=1.5, dash='dot'),
+                mode='lines'
+            ))
+            
+            fig_ichi.update_layout(
+                title=f"{selected_stock} - Ichimoku Cloud Analysis",
+                yaxis_title="Price (₹)",
+                xaxis_title="Time (IST)",
+                height=650,
+                xaxis_rangeslider_visible=False,
+                hovermode='x unified',
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                xaxis=dict(type=xaxis_type, tickformat=tickformat, tickangle=-45, nticks=15),
+                yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
+            )
+            
+            st.plotly_chart(fig_ichi, use_container_width=True)
+            st.info("💡 **Ichimoku Tips:** Price above cloud = Bullish | Price below cloud = Bearish | Tenkan-Kijun cross = Signal")
+        
+        elif chart_type == "Fibonacci":
+            st.subheader(f"📐 {selected_stock} - Fibonacci Retracement")
+            
+            fib_levels, fib_high, fib_low = calculate_fibonacci_levels(df)
+            
+            fig_fib = go.Figure()
+            
+            # Candlesticks
+            fig_fib.add_trace(go.Candlestick(
+                x=x_data,
+                open=df_plot['open'],
+                high=df_plot['high'],
+                low=df_plot['low'],
+                close=df_plot['close'],
+                name='Price',
+                increasing_line_color='#26a69a',
+                decreasing_line_color='#ef5350'
+            ))
+            
+            # Fibonacci levels
+            colors = ['#FF0000', '#FF6B6B', '#FFA500', '#FFD700', '#90EE90', '#00FF00', '#0000FF']
+            for idx, (level_name, level_value) in enumerate(fib_levels.items()):
+                fig_fib.add_hline(
+                    y=level_value,
+                    line_dash="dash",
+                    line_color=colors[idx % len(colors)],
+                    annotation_text=f"Fib {level_name} (₹{level_value:.2f})",
+                    annotation_position="right"
+                )
+            
+            fig_fib.update_layout(
+                title=f"{selected_stock} - Fibonacci Retracement Levels",
+                yaxis_title="Price (₹)",
+                xaxis_title="Time (IST)",
+                height=650,
+                xaxis_rangeslider_visible=False,
+                hovermode='x unified',
+                xaxis=dict(type=xaxis_type, tickformat=tickformat, tickangle=-45, nticks=15),
+                yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
+            )
+            
+            st.plotly_chart(fig_fib, use_container_width=True)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Swing High", f"₹{fib_high:.2f}")
+            with col2:
+                st.metric("Swing Low", f"₹{fib_low:.2f}")
+            
+            st.info("💡 **Fibonacci Tips:** 0.382, 0.5, 0.618 are key retracement levels for support/resistance")
+        
+        elif chart_type == "Volume Analysis":
+            st.subheader(f"📊 {selected_stock} - Volume Analysis (OBV & CMF)")
+            
+            # Price chart with volume bars
+            fig_vol = go.Figure()
+            
+            fig_vol.add_trace(go.Candlestick(
+                x=x_data,
+                open=df_plot['open'],
+                high=df_plot['high'],
+                low=df_plot['low'],
+                close=df_plot['close'],
+                name='Price',
+                yaxis='y',
+                increasing_line_color='#26a69a',
+                decreasing_line_color='#ef5350'
+            ))
+            
+            # Volume bars
+            colors = ['#26a69a' if df_plot['close'].iloc[i] >= df_plot['open'].iloc[i] else '#ef5350' 
+                     for i in range(len(df_plot))]
+            
+            fig_vol.add_trace(go.Bar(
+                x=x_data,
+                y=df_plot['volume'],
+                name='Volume',
+                yaxis='y2',
+                marker_color=colors,
+                opacity=0.5
+            ))
+            
+            fig_vol.update_layout(
+                title=f"{selected_stock} - Price and Volume",
+                yaxis_title="Price (₹)",
+                yaxis2=dict(
+                    title="Volume",
+                    overlaying='y',
+                    side='right'
+                ),
+                xaxis_title="Time (IST)",
+                height=450,
+                xaxis_rangeslider_visible=False,
+                hovermode='x unified',
+                xaxis=dict(type=xaxis_type, tickformat=tickformat, tickangle=-45, nticks=15)
+            )
+            
+            st.plotly_chart(fig_vol, use_container_width=True)
+            
+            # OBV Chart
+            st.markdown("**On-Balance Volume (OBV)**")
+            fig_obv = go.Figure()
+            
+            fig_obv.add_trace(go.Scatter(
+                x=x_data, y=df_plot['OBV'],
+                name='OBV',
+                line=dict(color='#2196F3', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(33, 150, 243, 0.1)'
+            ))
+            
+            fig_obv.update_layout(
+                title="On-Balance Volume Indicator",
+                yaxis_title="OBV",
+                xaxis_title="Time (IST)",
+                height=300,
+                hovermode='x unified',
+                xaxis=dict(type=xaxis_type, tickformat=tickformat, tickangle=-45, nticks=12)
+            )
+            
+            st.plotly_chart(fig_obv, use_container_width=True)
+            
+            # CMF Chart
+            st.markdown("**Chaikin Money Flow (CMF)**")
+            fig_cmf = go.Figure()
+            
+            fig_cmf.add_trace(go.Scatter(
+                x=x_data, y=df_plot['CMF'],
+                name='CMF',
+                line=dict(color='#9C27B0', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(156, 39, 176, 0.1)'
+            ))
+            
+            fig_cmf.add_hline(y=0, line_dash="solid", line_color="gray", line_width=1)
+            fig_cmf.add_hline(y=0.2, line_dash="dash", line_color="green", annotation_text="Strong Buying")
+            fig_cmf.add_hline(y=-0.2, line_dash="dash", line_color="red", annotation_text="Strong Selling")
+            
+            fig_cmf.update_layout(
+                title="Chaikin Money Flow Indicator",
+                yaxis_title="CMF Value",
+                xaxis_title="Time (IST)",
+                height=300,
+                hovermode='x unified',
+                xaxis=dict(type=xaxis_type, tickformat=tickformat, tickangle=-45, nticks=12)
+            )
+            
+            st.plotly_chart(fig_cmf, use_container_width=True)
+            
+            st.info("💡 **Volume Tips:** OBV confirms trends | CMF > 0.2 = Buying pressure | CMF < -0.2 = Selling pressure")
         
         # 2. BOLLINGER BANDS
         st.subheader("📊 Bollinger Bands (20, 2)")
@@ -694,11 +1363,33 @@ with tab2:
         fig_bb = go.Figure()
         
         fig_bb.add_trace(go.Scatter(
+            x=x_data, y=df_plot['BB_upper'],
+            name='Upper Band',
+            line=dict(color='#ef5350', width=1, dash='dash'),
+            mode='lines'
+        ))
+        
+        fig_bb.add_trace(go.Scatter(
+            x=x_data, y=df_plot['BB_middle'],
+            name='Middle Band (SMA 20)',
+            line=dict(color='#FFC107', width=2),
+            mode='lines'
+        ))
+        
+        fig_bb.add_trace(go.Scatter(
+            x=x_data, y=df_plot['BB_lower'],
+            name='Lower Band',
+            line=dict(color='#26a69a', width=1, dash='dash'),
+            mode='lines',
+            fill='tonexty',
+            fillcolor='rgba(156, 39, 176, 0.1)'
+        ))
+        
+        fig_bb.add_trace(go.Scatter(
             x=x_data, y=df_plot['close'],
             name='Close Price',
-            line=dict(color='#FFC107', width=2),
-            mode='lines',
-            visible=True
+            line=dict(color='#2196F3', width=2),
+            mode='lines'
         ))
         
         fig_bb.update_layout(
@@ -1212,6 +1903,7 @@ with tab4:
 st.markdown("---")
 st.caption("🔴 LIVE Dashboard powered by Zerodha Kite Connect WebSocket API")
 st.caption("📊 **Technical Indicators:** EMA (9, 21, 50) | SMA (20, 50, 200) | Bollinger Bands (20, 2) | Supertrend (10, 3) | RSI | MACD")
+st.caption("⚡ **Options Chain:** Real-time Call & Put data with OI, Volume, Greeks & PCR Analysis")
 st.caption("⏰ **Market Hours:** 9:15 AM - 3:30 PM IST (Mon-Fri)")
 st.caption("⚠ **Disclaimer:** For educational purposes only. Not financial advice. Trade at your own risk.")
 st.caption(f"📅 Last updated: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S IST')}")
