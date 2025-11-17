@@ -1,6 +1,6 @@
 streamlit>=1.28.0
 kiteconnect>=4.3.0
-ytfinance>=1.2.1
+ytfinance>=0.2.40
 pandas>=2.0.0
 plotly>=5.0.0
 feedparser>=6.0.0
