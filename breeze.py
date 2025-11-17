@@ -234,8 +234,35 @@ def get_spot_price(symbol):
     except Exception as e:
         return None
 
+def calculate_iv_approximation(option_price, spot_price, strike, time_to_expiry, option_type='CE'):
+    """
+    Approximate IV using a simplified method
+    This is a rough approximation - for accurate IV, use proper Black-Scholes solver
+    """
+    try:
+        if time_to_expiry <= 0 or option_price <= 0:
+            return 0
+        
+        # Intrinsic value
+        if option_type == 'CE':
+            intrinsic = max(0, spot_price - strike)
+        else:  # PE
+            intrinsic = max(0, strike - spot_price)
+        
+        # Time value
+        time_value = max(0, option_price - intrinsic)
+        
+        # Rough IV approximation (simplified)
+        # IV ≈ (Time Value / Spot Price) * sqrt(365 / days_to_expiry) * 100
+        if spot_price > 0 and time_to_expiry > 0:
+            iv = (time_value / spot_price) * (365 / time_to_expiry) ** 0.5 * 100
+            return min(max(iv, 0), 200)  # Cap between 0-200%
+        return 0
+    except:
+        return 0
+
 def get_options_chain(symbol, expiry_date):
-    """Fetch options chain"""
+    """Fetch options chain with IV calculation"""
     try:
         kite = st.session_state.kite
         instruments_nfo = get_instruments_nfo()
@@ -243,6 +270,11 @@ def get_options_chain(symbol, expiry_date):
             return None
         
         expiry_dt = datetime.strptime(expiry_date, "%Y-%m-%d").date()
+        
+        # Calculate days to expiry
+        today = datetime.now(IST).date()
+        days_to_expiry = (expiry_dt - today).days
+        time_to_expiry = max(days_to_expiry / 365.0, 0.001)  # Convert to years
         
         # Try exact match first
         options_data = instruments_nfo[
@@ -272,6 +304,11 @@ def get_options_chain(symbol, expiry_date):
         if options_data.empty:
             return None
         
+        # Get spot price
+        spot_price = get_spot_price(symbol)
+        if not spot_price:
+            spot_price = 0
+        
         symbols_list = [f"NFO:{ts}" for ts in options_data['tradingsymbol'].tolist()]
         
         chunk_size = 500
@@ -290,6 +327,18 @@ def get_options_chain(symbol, expiry_date):
         )
         options_data['oi'] = options_data['tradingsymbol'].apply(
             lambda x: all_quotes.get(f"NFO:{x}", {}).get('oi', 0)
+        )
+        
+        # Calculate IV for each option
+        options_data['iv'] = options_data.apply(
+            lambda row: calculate_iv_approximation(
+                row['ltp'],
+                spot_price,
+                row['strike'],
+                time_to_expiry,
+                row['instrument_type']
+            ),
+            axis=1
         )
         
         return options_data
