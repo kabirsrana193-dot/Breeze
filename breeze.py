@@ -2562,8 +2562,7 @@ with tab5:
                             textinfo='label+percent',
                             textposition='outside'
                         )
-                        
-                        fig_buy_pie.update_layout(
+                fig_buy_pie.update_layout(
                             title="Buy Activity Distribution",
                             height=350,
                             showlegend=True
