@@ -6,6 +6,7 @@ from kiteconnect import KiteConnect, KiteTicker
 import time
 import threading
 import pytz
+import yfinance as yf
 
 # Page config
 st.set_page_config(
@@ -24,7 +25,7 @@ API_SECRET = "mgso1jdnxj3xeei228dcciyqqx7axl77"  # ⚠️ REPLACE THIS
 IST = pytz.timezone('Asia/Kolkata')
 
 # --------------------------
-# FNO Stocks List
+# FNO Stocks List with Yahoo Finance symbols
 # --------------------------
 FNO_STOCKS = [
     "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK",
@@ -38,6 +39,60 @@ FNO_STOCKS = [
     "EICHERMOT", "UPL", "TATACONSUM", "BRITANNIA", "NESTLEIND",
     "HINDUNILVR", "CIPLA", "DRREDDY", "DIVISLAB", "APOLLOHOSP"
 ]
+
+# Mapping for Yahoo Finance symbols
+YAHOO_SYMBOLS = {
+    "RELIANCE": "RELIANCE.NS",
+    "TCS": "TCS.NS",
+    "HDFCBANK": "HDFCBANK.NS",
+    "INFY": "INFY.NS",
+    "ICICIBANK": "ICICIBANK.NS",
+    "BHARTIARTL": "BHARTIARTL.NS",
+    "ITC": "ITC.NS",
+    "SBIN": "SBIN.NS",
+    "HCLTECH": "HCLTECH.NS",
+    "AXISBANK": "AXISBANK.NS",
+    "KOTAKBANK": "KOTAKBANK.NS",
+    "LT": "LT.NS",
+    "BAJFINANCE": "BAJFINANCE.NS",
+    "ASIANPAINT": "ASIANPAINT.NS",
+    "MARUTI": "MARUTI.NS",
+    "TITAN": "TITAN.NS",
+    "SUNPHARMA": "SUNPHARMA.NS",
+    "WIPRO": "WIPRO.NS",
+    "ULTRACEMCO": "ULTRACEMCO.NS",
+    "TATAMOTORS": "TATAMOTORS.NS",
+    "ADANIPORTS": "ADANIPORTS.NS",
+    "ADANIENT": "ADANIENT.NS",
+    "TECHM": "TECHM.NS",
+    "POWERGRID": "POWERGRID.NS",
+    "NTPC": "NTPC.NS",
+    "COALINDIA": "COALINDIA.NS",
+    "TATASTEEL": "TATASTEEL.NS",
+    "BAJAJFINSV": "BAJAJFINSV.NS",
+    "HEROMOTOCO": "HEROMOTOCO.NS",
+    "INDUSINDBK": "INDUSINDBK.NS",
+    "M&M": "M&M.NS",
+    "GRASIM": "GRASIM.NS",
+    "HINDALCO": "HINDALCO.NS",
+    "JSWSTEEL": "JSWSTEEL.NS",
+    "SBILIFE": "SBILIFE.NS",
+    "ICICIGI": "ICICIGI.NS",
+    "BAJAJ-AUTO": "BAJAJ-AUTO.NS",
+    "HDFCLIFE": "HDFCLIFE.NS",
+    "ADANIGREEN": "ADANIGREEN.NS",
+    "SHREECEM": "SHREECEM.NS",
+    "EICHERMOT": "EICHERMOT.NS",
+    "UPL": "UPL.NS",
+    "TATACONSUM": "TATACONSUM.NS",
+    "BRITANNIA": "BRITANNIA.NS",
+    "NESTLEIND": "NESTLEIND.NS",
+    "HINDUNILVR": "HINDUNILVR.NS",
+    "CIPLA": "CIPLA.NS",
+    "DRREDDY": "DRREDDY.NS",
+    "DIVISLAB": "DIVISLAB.NS",
+    "APOLLOHOSP": "APOLLOHOSP.NS"
+}
 
 # --------------------------
 # Initialize session state
@@ -60,6 +115,8 @@ if 'kws' not in st.session_state:
     st.session_state.kws = None
 if 'live_monitor_running' not in st.session_state:
     st.session_state.live_monitor_running = False
+if 'yahoo_live_data' not in st.session_state:
+    st.session_state.yahoo_live_data = {}
 
 # --------------------------
 # Login Management
@@ -347,8 +404,51 @@ def get_options_chain(symbol, expiry_date):
         st.error(f"Error fetching options chain: {e}")
         return None
 
+def get_yahoo_live_price(symbol):
+    """Get live price from Yahoo Finance"""
+    try:
+        yahoo_symbol = YAHOO_SYMBOLS.get(symbol, f"{symbol}.NS")
+        ticker = yf.Ticker(yahoo_symbol)
+        
+        # Get current data
+        data = ticker.history(period='1d', interval='1m')
+        
+        if not data.empty:
+            latest = data.iloc[-1]
+            return {
+                'ltp': latest['Close'],
+                'open': data.iloc[0]['Open'],
+                'high': data['High'].max(),
+                'low': data['Low'].min(),
+                'volume': data['Volume'].sum(),
+                'change': latest['Close'] - data.iloc[0]['Open'],
+                'timestamp': datetime.now(IST)
+            }
+        return None
+    except Exception as e:
+        print(f"Error fetching Yahoo data for {symbol}: {e}")
+        return None
+
+def get_yahoo_intraday_data(symbol, days=1):
+    """Get intraday data from Yahoo Finance"""
+    try:
+        yahoo_symbol = YAHOO_SYMBOLS.get(symbol, f"{symbol}.NS")
+        ticker = yf.Ticker(yahoo_symbol)
+        
+        # Get intraday data
+        data = ticker.history(period=f'{days}d', interval='1m')
+        
+        if not data.empty:
+            # Filter to market hours
+            data = data.between_time('09:15', '15:30')
+            return data
+        return None
+    except Exception as e:
+        print(f"Error fetching Yahoo intraday data for {symbol}: {e}")
+        return None
+
 # --------------------------
-# WebSocket Functions
+# WebSocket Functions (kept for compatibility)
 # --------------------------
 def start_websocket(symbols):
     """Start WebSocket connection"""
@@ -432,7 +532,7 @@ def stop_websocket():
         pass
 
 # --------------------------
-# Technical Indicators
+# Technical Indicators (keeping existing functions)
 # --------------------------
 def calculate_sma(data, period):
     """Calculate Simple Moving Average"""
@@ -699,6 +799,7 @@ def detect_chart_patterns(df, window=20):
             patterns.append(("Symmetrical Triangle", "Neutral", "Breakout expected"))
     
     return patterns
+
 # --------------------------
 # Main Dashboard
 # --------------------------
@@ -961,6 +1062,7 @@ with tab1:
                 st.info("💡 Try different stock or expiry date")
         else:
             st.error("❌ Unable to fetch spot price")
+
 # TAB 2: CHARTS
 with tab2:
     st.header("Stock Charts with Technical Indicators")
@@ -972,8 +1074,8 @@ with tab2:
         selected_stock = st.selectbox("Select Stock", FNO_STOCKS, key="chart_stock")
     
     with col2:
-        period = st.selectbox("Period", ["1 Week", "2 Weeks", "1 Month", "3 Months"], key="chart_period")
-        days_map = {"1 Week": 7, "2 Weeks": 14, "1 Month": 30, "3 Months": 90}
+        period = st.selectbox("Period", ["1 Day", "1 Week", "2 Weeks", "1 Month", "3 Months"], key="chart_period")
+        days_map = {"1 Day": 1, "1 Week": 7, "2 Weeks": 14, "1 Month": 30, "3 Months": 90}
         days = days_map[period]
     
     with col3:
@@ -1721,10 +1823,10 @@ with tab2:
         st.error(f"❌ No data available for {selected_stock}")
         st.info("📌 Try selecting a different time period or interval")
 
-# TAB 3: LIVE MONITOR
+# TAB 3: LIVE MONITOR (Using Yahoo Finance)
 with tab3:
-    st.header("🔴 LIVE Intraday Monitor (WebSocket)")
-    st.caption("⏰ Market Hours: 9:15 AM - 3:30 PM IST | Updates every 3 seconds")
+    st.header("🔴 LIVE Intraday Monitor (Yahoo Finance)")
+    st.caption("⏰ Market Hours: 9:15 AM - 3:30 PM IST | Updates every 5 seconds")
     
     # Check market hours
     now = datetime.now(IST)
@@ -1756,33 +1858,21 @@ with tab3:
                 st.info(f"⏰ Closed at 3:30 PM")
     
     with col3:
-        if st.button("🔴 Start Live Stream", key="start_live_btn"):
-            if watchlist and is_market_open:
-                stop_websocket()  # Stop any existing connection
-                st.session_state.live_data = {}  # Clear old data
-                if start_websocket(watchlist):
-                    st.success("✅ Connected!")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to connect")
-            elif not watchlist:
-                st.warning("⚠️ Select stocks first")
-            else:
-                st.warning("⚠️ Market is closed")
+        if st.button("🔴 Start Live Monitor", key="start_yahoo_live"):
+            st.session_state.live_monitor_running = True
+            st.rerun()
         
-        if st.button("⏹ Stop Stream", key="stop_live_btn"):
-            stop_websocket()
-            st.info("⏹ Stopped")
-            time.sleep(1)
+        if st.button("⏹ Stop Monitor", key="stop_yahoo_live"):
+            st.session_state.live_monitor_running = False
+            st.session_state.yahoo_live_data = {}
             st.rerun()
     
     st.markdown("---")
     
-    if st.session_state.ticker_active and watchlist:
-        st.success(f"🔴 LIVE: Streaming {len(watchlist)} stocks")
+    if st.session_state.live_monitor_running and watchlist:
+        st.success(f"🔴 LIVE: Monitoring {len(watchlist)} stocks from Yahoo Finance")
         
-        # Auto-refresh placeholder
+        # Fetch live data from Yahoo Finance
         placeholder = st.empty()
         
         with placeholder.container():
@@ -1799,12 +1889,14 @@ with tab3:
                         symbol = watchlist[stock_idx]
                         
                         with col:
-                            if symbol in st.session_state.live_data:
-                                data = st.session_state.live_data[symbol]
-                                ltp = data['ltp']
-                                close = data['close']
-                                change = ltp - close if close > 0 else 0
-                                change_pct = (change / close * 100) if close > 0 else 0
+                            # Fetch Yahoo Finance data
+                            yahoo_data = get_yahoo_live_price(symbol)
+                            
+                            if yahoo_data:
+                                st.session_state.yahoo_live_data[symbol] = yahoo_data
+                                ltp = yahoo_data['ltp']
+                                change = yahoo_data['change']
+                                change_pct = (change / yahoo_data['open'] * 100) if yahoo_data['open'] > 0 else 0
                                 arrow = "🟢" if change >= 0 else "🔴"
                                 
                                 st.markdown(f"### {arrow} **{symbol}**")
@@ -1813,22 +1905,89 @@ with tab3:
                                 with col_a:
                                     st.metric("LTP", f"₹{ltp:.2f}", f"{change:.2f} ({change_pct:.2f}%)")
                                 with col_b:
-                                    st.metric("Volume", f"{data['volume']:,}")
+                                    st.metric("Volume", f"{yahoo_data['volume']:,.0f}")
                                 
-                                st.caption(f"**O:** ₹{data['open']:.2f} | **H:** ₹{data['high']:.2f} | **L:** ₹{data['low']:.2f}")
-                                st.caption(f"⏱ {data['timestamp'].strftime('%H:%M:%S IST')}")
+                                st.caption(f"**O:** ₹{yahoo_data['open']:.2f} | **H:** ₹{yahoo_data['high']:.2f} | **L:** ₹{yahoo_data['low']:.2f}")
+                                st.caption(f"⏱ {yahoo_data['timestamp'].strftime('%H:%M:%S IST')}")
                             else:
-                                st.info(f"⏳ Connecting {symbol}...")
+                                st.info(f"⏳ Loading {symbol}...")
+            
+            # Show intraday chart for selected stock
+            st.markdown("---")
+            st.subheader("📈 Intraday Chart")
+            
+            selected_for_chart = st.selectbox(
+                "Select stock for chart:",
+                watchlist,
+                key="chart_selection"
+            )
+            
+            if selected_for_chart:
+                with st.spinner(f"Loading intraday chart for {selected_for_chart}..."):
+                    intraday_df = get_yahoo_intraday_data(selected_for_chart, days=1)
+                    
+                    if intraday_df is not None and not intraday_df.empty:
+                        # Create intraday chart with proper y-axis scaling
+                        fig_intraday = go.Figure()
+                        
+                        fig_intraday.add_trace(go.Scatter(
+                            x=intraday_df.index,
+                            y=intraday_df['Close'],
+                            mode='lines',
+                            name='Price',
+                            line=dict(color='#2196F3', width=2),
+                            fill='tozeroy',
+                            fillcolor='rgba(33, 150, 243, 0.1)'
+                        ))
+                        
+                        # Calculate proper y-axis range with padding
+                        y_min = intraday_df['Close'].min()
+                        y_max = intraday_df['Close'].max()
+                        y_range = y_max - y_min
+                        y_padding = y_range * 0.1  # 10% padding
+                        
+                        fig_intraday.update_layout(
+                            title=f"{selected_for_chart} - Intraday Price Movement",
+                            xaxis_title="Time (IST)",
+                            yaxis_title="Price (₹)",
+                            height=400,
+                            hovermode='x unified',
+                            yaxis=dict(
+                                range=[y_min - y_padding, y_max + y_padding],
+                                showgrid=True,
+                                gridcolor='rgba(128,128,128,0.2)'
+                            ),
+                            xaxis=dict(
+                                showgrid=True,
+                                gridcolor='rgba(128,128,128,0.2)'
+                            )
+                        )
+                        
+                        st.plotly_chart(fig_intraday, use_container_width=True)
+                        
+                        # Show current stats
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Current", f"₹{intraday_df['Close'].iloc[-1]:.2f}")
+                        with col2:
+                            day_change = intraday_df['Close'].iloc[-1] - intraday_df['Open'].iloc[0]
+                            day_change_pct = (day_change / intraday_df['Open'].iloc[0]) * 100
+                            st.metric("Day Change", f"₹{day_change:.2f}", f"{day_change_pct:.2f}%")
+                        with col3:
+                            st.metric("Day High", f"₹{intraday_df['High'].max():.2f}")
+                        with col4:
+                            st.metric("Day Low", f"₹{intraday_df['Low'].min():.2f}")
+                    else:
+                        st.warning(f"No intraday data available for {selected_for_chart}")
         
-        # Auto-refresh after 3 seconds
-        time.sleep(3)
+        # Auto-refresh after 5 seconds
+        time.sleep(5)
         st.rerun()
     
-    elif watchlist and not is_market_open:
-        st.warning("⚠️ Live streaming only works during market hours (Mon-Fri, 9:15 AM - 3:30 PM IST)")
-        st.info("💡 Click 'Start Live Stream' button during market hours to begin")
+    elif watchlist and not st.session_state.live_monitor_running:
+        st.info("👆 Click 'Start Live Monitor' to begin real-time monitoring with Yahoo Finance")
     else:
-        st.info("👆 Select stocks and click 'Start Live Stream' button")
+        st.info("👆 Select stocks and click 'Start Live Monitor'")
 
 # TAB 4: PORTFOLIO
 with tab4:
@@ -1875,6 +2034,6 @@ with tab4:
 
 # Footer
 st.markdown("---")
-st.caption("🔴 Dashboard powered by Zerodha Kite Connect API")
+st.caption("🔴 Dashboard powered by Zerodha Kite Connect API & Yahoo Finance")
 st.caption("⚠ **Disclaimer:** For educational purposes only. Not financial advice.")
 st.caption(f"📅 Last updated: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S IST')}")
