@@ -2499,7 +2499,7 @@ with tab5:
                 
             except Exception as e:
                 st.error(f"Error parsing data: {e}")
-                st.json((fii_dii_data)
+                st.json(fii_dii_data)
                    
         else:
             st.warning("❌ Unable to fetch FII/DII data from NSE")
