@@ -307,75 +307,30 @@ def get_option_iv_from_google(symbol, strike, expiry_date, option_type='CE'):
 
 def fetch_fii_dii_data():
     """
-    Fetch FII/DII data from MoneyControl (public source)
+    Fetch FII/DII data from NSE or other sources
     Returns data for Cash, Index Futures, Index Options, and Stock Futures
     """
     try:
-        # Try MoneyControl as primary source
-        url = "https://www.moneycontrol.com/stocks/marketstats/fii_dii_activity/index.php"
+        # NSE FII/DII data URL
+        url = "https://www.nseindia.com/api/fiidiiTradeReact"
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
         }
         
-        response = requests.get(url, headers=headers, timeout=15)
+        session = requests.Session()
+        # First request to get cookies
+        session.get("https://www.nseindia.com", headers=headers, timeout=10)
+        
+        # Second request to get actual data
+        response = session.get(url, headers=headers, timeout=10)
         
         if response.status_code == 200:
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Parse the table data
-            data = []
-            tables = soup.find_all('table', class_='mctable1')
-            
-            if tables:
-                for table in tables:
-                    rows = table.find_all('tr')
-                    for row in rows[1:]:  # Skip header
-                        cols = row.find_all('td')
-                        if len(cols) >= 5:
-                            category = cols[0].text.strip()
-                            date_val = cols[1].text.strip() if len(cols) > 1 else ''
-                            buy_val = cols[2].text.strip().replace(',', '') if len(cols) > 2 else '0'
-                            sell_val = cols[3].text.strip().replace(',', '') if len(cols) > 3 else '0'
-                            net_val = cols[4].text.strip().replace(',', '') if len(cols) > 4 else '0'
-                            
-                            # Clean values
-                            try:
-                                buy_val = float(buy_val)
-                            except:
-                                buy_val = 0
-                            try:
-                                sell_val = float(sell_val)
-                            except:
-                                sell_val = 0
-                            try:
-                                net_val = float(net_val)
-                            except:
-                                net_val = 0
-                            
-                            data.append({
-                                'category': category,
-                                'date': date_val if date_val else datetime.now(IST).strftime('%d-%b-%Y'),
-                                'buyValue': buy_val,
-                                'sellValue': sell_val,
-                                'netValue': net_val
-                            })
-            
-            if data:
-                return data
-        
-        # Fallback: Try NSE if MoneyControl fails
-        url_nse = "https://www.nseindia.com/api/fiidiiTradeReact"
-        session = requests.Session()
-        session.get("https://www.nseindia.com", headers=headers, timeout=10)
-        response_nse = session.get(url_nse, headers=headers, timeout=10)
-        
-        if response_nse.status_code == 200:
-            return response_nse.json()
-        
+            data = response.json()
+            return data
         return None
-        
     except Exception as e:
         print(f"Error fetching FII/DII data: {e}")
         return None
@@ -2170,12 +2125,6 @@ with tab5:
             
             # Display the data
             try:
-                # First, let's see what we're getting
-                st.info("📋 **Data Structure Received:**")
-                st.json(fii_dii_data)
-                
-                st.markdown("---")
-                
                 # Parse all categories
                 data_dict = {}
                 current_date = None
@@ -2193,30 +2142,24 @@ with tab5:
                     else:
                         continue
                     
-                    # Determine market segment - check the actual category string
-                    category_lower = category.lower()
-                    if 'index futures' in category_lower or 'index future' in category_lower:
+                    # Determine market segment
+                    if 'Index Futures' in category:
                         segment = 'Index Futures'
-                    elif 'index options' in category_lower or 'index option' in category_lower:
+                    elif 'Index Options' in category:
                         segment = 'Index Options'
-                    elif 'stock futures' in category_lower or 'stock future' in category_lower:
+                    elif 'Stock Futures' in category:
                         segment = 'Stock Futures'
-                    elif 'stock options' in category_lower or 'stock option' in category_lower:
+                    elif 'Stock Options' in category:
                         segment = 'Stock Options'
                     else:
-                        # Default to Cash/Equity if no specific segment mentioned
                         segment = 'Cash/Equity'
                     
                     key = f"{investor_type}_{segment}"
                     data_dict[key] = {
                         'buy': float(entry.get('buyValue', 0)),
                         'sell': float(entry.get('sellValue', 0)),
-                        'net': float(entry.get('netValue', 0)),
-                        'category': category  # Store original category for debugging
+                        'net': float(entry.get('netValue', 0))
                     }
-                
-                # Show what segments we found
-                st.info(f"📊 **Segments Found:** {list(data_dict.keys())}")
                 
                 # Display date
                 st.subheader(f"📅 Data as of: {current_date}")
@@ -2556,67 +2499,8 @@ with tab5:
                 
             except Exception as e:
                 st.error(f"Error parsing data: {e}")
-                st.json((fii_dii_data),
-                            hole=0.4,
-                            marker_colors=['#2196F3', '#FF9800'],
-                            textinfo='label+percent',
-                            textposition='outside'
-                        )
-                fig_buy_pie.update_layout(
-                            title="Buy Activity Distribution",
-                            height=350,
-                            showlegend=True
-                        )
-                st.plotly_chart(fig_buy_pie, use_container_width=True)
-                with col2:
-                        # Total sell participation
-                        fig_sell_pie = go.Figure(data=[go.Pie(
-                            labels=['FII/FPI', 'DII'],
-                            values=[float(fii_entry.get('sellValue', 0)), float(dii_entry.get('sellValue', 0))],
-                            hole=0.4,
-                            marker_colors=['#E91E63', '#9C27B0'],
-                            textinfo='label+percent',
-                            textposition='outside'
-                        )])
-                        
-                        fig_sell_pie.update_layout(
-                            title="Sell Activity Distribution",
-                            height=350,
-                            showlegend=True
-                        )
-                        
-                        st.plotly_chart(fig_sell_pie, use_container_width=True)
-                    st.markdown("---")
-                    st.subheader("💡 Market Insights")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if fii_net > 0 and dii_net > 0:
-                            st.success("🟢 **Bullish Signal:** Both FII and DII are net buyers")
-                        elif fii_net < 0 and dii_net < 0:
-                            st.error("🔴 **Bearish Signal:** Both FII and DII are net sellers")
-                        elif fii_net > 0 and dii_net < 0:
-                            st.info("🔵 **Mixed Signal:** FII buying, DII selling - FII confidence")
-                        elif fii_net < 0 and dii_net > 0:
-                            st.warning("🟡 **Mixed Signal:** DII buying, FII selling - Local support")
-                    
-                    with col2:
-                        if abs(fii_net) > abs(dii_net):
-                            st.info(f"📊 **FII Dominance:** FII activity is stronger (₹{abs(fii_net - dii_net):,.2f} Cr)")
-                        elif abs(dii_net) > abs(fii_net):
-                            st.info(f"📊 **DII Dominance:** DII activity is stronger (₹{abs(dii_net - fii_net):,.2f} Cr)")
-                        else:
-                            st.info("⚖️ **Balanced:** FII and DII activity is balanced")
-                    
-                else:
-                    st.warning("⚠️ Unable to parse FII/DII data structure")
-                    st.json(fii_dii_data)
-                
-            except Exception as e:
-                st.error(f"Error parsing data: {e}")
                 st.json(fii_dii_data)
-        
+                   
         else:
             st.warning("❌ Unable to fetch FII/DII data from NSE")
             st.info("💡 **Possible reasons:**")
