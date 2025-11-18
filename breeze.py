@@ -2499,72 +2499,8 @@ with tab5:
                 
             except Exception as e:
                 st.error(f"Error parsing data: {e}")
-                st.json((fii_dii_data),
-                            hole=0.4,
-                            marker_colors=['#2196F3', '#FF9800'],
-                            textinfo='label+percent',
-                            textposition='outside'
-                )
-                        
-                            fig_buy_pie.update_layout(
-                            title="Buy Activity Distribution",
-                            height=350,
-                            showlegend=True
-                )
-                        
-                        st.plotly_chart(fig_buy_pie, use_container_width=True)
-                    
-                    with col2:
-                        # Total sell participation
-                        fig_sell_pie = go.Figure(data=[go.Pie(
-                            labels=['FII/FPI', 'DII'],
-                            values=[float(fii_entry.get('sellValue', 0)), float(dii_entry.get('sellValue', 0))],
-                            hole=0.4,
-                            marker_colors=['#E91E63', '#9C27B0'],
-                            textinfo='label+percent',
-                            textposition='outside'
-                        )])
-                        
-                        fig_sell_pie.update_layout(
-                            title="Sell Activity Distribution",
-                            height=350,
-                            showlegend=True
-                        )
-                        
-                        st.plotly_chart(fig_sell_pie, use_container_width=True)
-                    
-                    # Insights
-                    st.markdown("---")
-                    st.subheader("💡 Market Insights")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if fii_net > 0 and dii_net > 0:
-                            st.success("🟢 **Bullish Signal:** Both FII and DII are net buyers")
-                        elif fii_net < 0 and dii_net < 0:
-                            st.error("🔴 **Bearish Signal:** Both FII and DII are net sellers")
-                        elif fii_net > 0 and dii_net < 0:
-                            st.info("🔵 **Mixed Signal:** FII buying, DII selling - FII confidence")
-                        elif fii_net < 0 and dii_net > 0:
-                            st.warning("🟡 **Mixed Signal:** DII buying, FII selling - Local support")
-                    
-                    with col2:
-                        if abs(fii_net) > abs(dii_net):
-                            st.info(f"📊 **FII Dominance:** FII activity is stronger (₹{abs(fii_net - dii_net):,.2f} Cr)")
-                        elif abs(dii_net) > abs(fii_net):
-                            st.info(f"📊 **DII Dominance:** DII activity is stronger (₹{abs(dii_net - fii_net):,.2f} Cr)")
-                        else:
-                            st.info("⚖️ **Balanced:** FII and DII activity is balanced")
-                    
-                else:
-                    st.warning("⚠️ Unable to parse FII/DII data structure")
-                    st.json(fii_dii_data)
-                
-            except Exception as e:
-                st.error(f"Error parsing data: {e}")
-                st.json(fii_dii_data)
-        
+                st.json((fii_dii_data)
+                   
         else:
             st.warning("❌ Unable to fetch FII/DII data from NSE")
             st.info("💡 **Possible reasons:**")
