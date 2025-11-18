@@ -2506,11 +2506,11 @@ with tab5:
                             textposition='outside'
                 )
                         
-                        fig_buy_pie.update_layout(
+                            fig_buy_pie.update_layout(
                             title="Buy Activity Distribution",
                             height=350,
                             showlegend=True
-                        )
+                )
                         
                         st.plotly_chart(fig_buy_pie, use_container_width=True)
                     
