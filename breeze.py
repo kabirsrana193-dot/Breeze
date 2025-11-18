@@ -2499,7 +2499,7 @@ with tab5:
                 
             except Exception as e:
                 st.error(f"Error parsing data: {e}")
-                st.json(fii_dii_data)))],
+                st.json(fii_dii_data))],
                             hole=0.4,
                             marker_colors=['#2196F3', '#FF9800'],
                             textinfo='label+percent',
