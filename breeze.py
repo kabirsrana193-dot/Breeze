@@ -308,6 +308,7 @@ def get_option_iv_from_google(symbol, strike, expiry_date, option_type='CE'):
 def fetch_fii_dii_data():
     """
     Fetch FII/DII data from NSE or other sources
+    Returns data for Cash, Index Futures, Index Options, and Stock Futures
     """
     try:
         # NSE FII/DII data URL
@@ -2124,25 +2125,197 @@ with tab5:
             
             # Display the data
             try:
-                # Parse the data
-                fii_entry = None
-                dii_entry = None
+                # Parse all categories
+                data_dict = {}
+                current_date = None
                 
                 for entry in fii_dii_data:
-                    if 'FII' in entry.get('category', ''):
-                        fii_entry = entry
-                    elif 'DII' in entry.get('category', ''):
-                        dii_entry = entry
+                    category = entry.get('category', '')
+                    if not current_date:
+                        current_date = entry.get('date', 'N/A')
+                    
+                    # Store data by category
+                    if 'FII' in category or 'FPI' in category:
+                        investor_type = 'FII'
+                    elif 'DII' in category:
+                        investor_type = 'DII'
+                    else:
+                        continue
+                    
+                    # Determine market segment
+                    if 'Index Futures' in category:
+                        segment = 'Index Futures'
+                    elif 'Index Options' in category:
+                        segment = 'Index Options'
+                    elif 'Stock Futures' in category:
+                        segment = 'Stock Futures'
+                    elif 'Stock Options' in category:
+                        segment = 'Stock Options'
+                    else:
+                        segment = 'Cash/Equity'
+                    
+                    key = f"{investor_type}_{segment}"
+                    data_dict[key] = {
+                        'buy': float(entry.get('buyValue', 0)),
+                        'sell': float(entry.get('sellValue', 0)),
+                        'net': float(entry.get('netValue', 0))
+                    }
                 
-                if fii_entry and dii_entry:
-                    # Display date
-                    st.subheader(f"📅 Data as of: {fii_entry.get('date', 'N/A')}")
+                # Display date
+                st.subheader(f"📅 Data as of: {current_date}")
+                
+                # Create tabs for different segments
+                segment_tabs = st.tabs(["📊 Overview", "💵 Cash/Equity", "📈 Index Futures", "📉 Index Options", "🔄 Stock Futures"])
+                
+                # TAB 1: OVERVIEW
+                with segment_tabs[0]:
+                    st.subheader("📊 Complete Market Activity Overview")
+                    
+                    # Calculate totals for FII and DII
+                    fii_total_buy = sum([data_dict.get(k, {}).get('buy', 0) for k in data_dict.keys() if k.startswith('FII')])
+                    fii_total_sell = sum([data_dict.get(k, {}).get('sell', 0) for k in data_dict.keys() if k.startswith('FII')])
+                    fii_total_net = sum([data_dict.get(k, {}).get('net', 0) for k in data_dict.keys() if k.startswith('FII')])
+                    
+                    dii_total_buy = sum([data_dict.get(k, {}).get('buy', 0) for k in data_dict.keys() if k.startswith('DII')])
+                    dii_total_sell = sum([data_dict.get(k, {}).get('sell', 0) for k in data_dict.keys() if k.startswith('DII')])
+                    dii_total_net = sum([data_dict.get(k, {}).get('net', 0) for k in data_dict.keys() if k.startswith('DII')])
                     
                     # Display summary cards
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        fii_net = float(fii_entry.get('netValue', 0))
+                        fii_color = "🟢" if fii_total_net >= 0 else "🔴"
+                        st.markdown(f"### {fii_color} FII/FPI (Total)")
+                        st.metric(
+                            "Net Value",
+                            f"₹{abs(fii_total_net):,.2f} Cr",
+                            delta=f"{'Inflow' if fii_total_net >= 0 else 'Outflow'}",
+                            delta_color="normal" if fii_total_net >= 0 else "inverse"
+                        )
+                        st.caption(f"**Buy:** ₹{fii_total_buy:,.2f} Cr")
+                        st.caption(f"**Sell:** ₹{fii_total_sell:,.2f} Cr")
+                    
+                    with col2:
+                        dii_color = "🟢" if dii_total_net >= 0 else "🔴"
+                        st.markdown(f"### {dii_color} DII (Total)")
+                        st.metric(
+                            "Net Value",
+                            f"₹{abs(dii_total_net):,.2f} Cr",
+                            delta=f"{'Inflow' if dii_total_net >= 0 else 'Outflow'}",
+                            delta_color="normal" if dii_total_net >= 0 else "inverse"
+                        )
+                        st.caption(f"**Buy:** ₹{dii_total_buy:,.2f} Cr")
+                        st.caption(f"**Sell:** ₹{dii_total_sell:,.2f} Cr")
+                    
+                    with col3:
+                        total_net = fii_total_net + dii_total_net
+                        total_color = "🟢" if total_net >= 0 else "🔴"
+                        st.markdown(f"### {total_color} Combined")
+                        st.metric(
+                            "Net Value",
+                            f"₹{abs(total_net):,.2f} Cr",
+                            delta=f"{'Net Buy' if total_net >= 0 else 'Net Sell'}",
+                            delta_color="normal" if total_net >= 0 else "inverse"
+                        )
+                        st.caption(f"**Buy:** ₹{fii_total_buy + dii_total_buy:,.2f} Cr")
+                        st.caption(f"**Sell:** ₹{fii_total_sell + dii_total_sell:,.2f} Cr")
+                    
+                    st.markdown("---")
+                    
+                    # Segment-wise breakdown chart
+                    st.subheader("📊 Segment-wise Net Activity")
+                    
+                    segments = ['Cash/Equity', 'Index Futures', 'Index Options', 'Stock Futures']
+                    fii_segment_data = []
+                    dii_segment_data = []
+                    
+                    for seg in segments:
+                        fii_key = f"FII_{seg}"
+                        dii_key = f"DII_{seg}"
+                        fii_segment_data.append(data_dict.get(fii_key, {}).get('net', 0))
+                        dii_segment_data.append(data_dict.get(dii_key, {}).get('net', 0))
+                    
+                    fig_segments = go.Figure()
+                    
+                    fig_segments.add_trace(go.Bar(
+                        name='FII/FPI',
+                        x=segments,
+                        y=fii_segment_data,
+                        marker_color='#2196F3',
+                        text=[f'₹{val:,.0f} Cr' for val in fii_segment_data],
+                        textposition='outside',
+                        textfont=dict(size=11, color='#2196F3', family='Arial Black')
+                    ))
+                    
+                    fig_segments.add_trace(go.Bar(
+                        name='DII',
+                        x=segments,
+                        y=dii_segment_data,
+                        marker_color='#FF9800',
+                        text=[f'₹{val:,.0f} Cr' for val in dii_segment_data],
+                        textposition='outside',
+                        textfont=dict(size=11, color='#FF9800', family='Arial Black')
+                    ))
+                    
+                    fig_segments.add_hline(y=0, line_dash="solid", line_color="gray", line_width=1)
+                    
+                    fig_segments.update_layout(
+                        title={
+                            'text': "FII vs DII - Segment-wise Net Activity",
+                            'font': {'size': 18, 'family': 'Arial Black', 'color': '#333'}
+                        },
+                        yaxis_title="Net Value (₹ Crores)",
+                        xaxis_title="Market Segment",
+                        height=450,
+                        barmode='group',
+                        hovermode='x unified',
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        )
+                    )
+                    
+                    st.plotly_chart(fig_segments, use_container_width=True)
+                    
+                    # Market Insights
+                    st.markdown("---")
+                    st.subheader("💡 Market Insights")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if fii_total_net > 0 and dii_total_net > 0:
+                            st.success("🟢 **Bullish Signal:** Both FII and DII are net buyers across all segments")
+                        elif fii_total_net < 0 and dii_total_net < 0:
+                            st.error("🔴 **Bearish Signal:** Both FII and DII are net sellers across all segments")
+                        elif fii_total_net > 0 and dii_total_net < 0:
+                            st.info("🔵 **Mixed Signal:** FII buying, DII selling - Foreign confidence")
+                        elif fii_total_net < 0 and dii_total_net > 0:
+                            st.warning("🟡 **Mixed Signal:** DII buying, FII selling - Local support")
+                    
+                    with col2:
+                        if abs(fii_total_net) > abs(dii_total_net):
+                            st.info(f"📊 **FII Dominance:** FII activity stronger by ₹{abs(fii_total_net - dii_total_net):,.2f} Cr")
+                        elif abs(dii_total_net) > abs(fii_total_net):
+                            st.info(f"📊 **DII Dominance:** DII activity stronger by ₹{abs(dii_total_net - fii_total_net):,.2f} Cr")
+                        else:
+                            st.info("⚖️ **Balanced:** FII and DII activity is balanced")
+                
+                # Function to create segment tab content
+                def create_segment_tab(segment_name, fii_key, dii_key):
+                    fii_data = data_dict.get(fii_key, {'buy': 0, 'sell': 0, 'net': 0})
+                    dii_data = data_dict.get(dii_key, {'buy': 0, 'sell': 0, 'net': 0})
+                    
+                    st.subheader(f"📊 {segment_name} Activity")
+                    
+                    # Summary cards
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        fii_net = fii_data['net']
                         fii_color = "🟢" if fii_net >= 0 else "🔴"
                         st.markdown(f"### {fii_color} FII/FPI")
                         st.metric(
@@ -2151,11 +2324,11 @@ with tab5:
                             delta=f"{'Inflow' if fii_net >= 0 else 'Outflow'}",
                             delta_color="normal" if fii_net >= 0 else "inverse"
                         )
-                        st.caption(f"Buy: ₹{float(fii_entry.get('buyValue', 0)):,.2f} Cr")
-                        st.caption(f"Sell: ₹{float(fii_entry.get('sellValue', 0)):,.2f} Cr")
+                        st.caption(f"**Buy:** ₹{fii_data['buy']:,.2f} Cr")
+                        st.caption(f"**Sell:** ₹{fii_data['sell']:,.2f} Cr")
                     
                     with col2:
-                        dii_net = float(dii_entry.get('netValue', 0))
+                        dii_net = dii_data['net']
                         dii_color = "🟢" if dii_net >= 0 else "🔴"
                         st.markdown(f"### {dii_color} DII")
                         st.metric(
@@ -2164,68 +2337,29 @@ with tab5:
                             delta=f"{'Inflow' if dii_net >= 0 else 'Outflow'}",
                             delta_color="normal" if dii_net >= 0 else "inverse"
                         )
-                        st.caption(f"Buy: ₹{float(dii_entry.get('buyValue', 0)):,.2f} Cr")
-                        st.caption(f"Sell: ₹{float(dii_entry.get('sellValue', 0)):,.2f} Cr")
+                        st.caption(f"**Buy:** ₹{dii_data['buy']:,.2f} Cr")
+                        st.caption(f"**Sell:** ₹{dii_data['sell']:,.2f} Cr")
                     
                     with col3:
                         total_net = fii_net + dii_net
                         total_color = "🟢" if total_net >= 0 else "🔴"
-                        st.markdown(f"### {total_color} Total (FII+DII)")
+                        st.markdown(f"### {total_color} Combined")
                         st.metric(
-                            "Combined Net",
+                            "Net Value",
                             f"₹{abs(total_net):,.2f} Cr",
                             delta=f"{'Net Buy' if total_net >= 0 else 'Net Sell'}",
                             delta_color="normal" if total_net >= 0 else "inverse"
                         )
-                        total_buy = float(fii_entry.get('buyValue', 0)) + float(dii_entry.get('buyValue', 0))
-                        total_sell = float(fii_entry.get('sellValue', 0)) + float(dii_entry.get('sellValue', 0))
-                        st.caption(f"Buy: ₹{total_buy:,.2f} Cr")
-                        st.caption(f"Sell: ₹{total_sell:,.2f} Cr")
+                        st.caption(f"**Buy:** ₹{fii_data['buy'] + dii_data['buy']:,.2f} Cr")
+                        st.caption(f"**Sell:** ₹{fii_data['sell'] + dii_data['sell']:,.2f} Cr")
                     
                     st.markdown("---")
                     
-                    # Detailed data table
-                    st.subheader("📋 Detailed Breakdown")
-                    
-                    detail_data = {
-                        'Category': ['FII/FPI', 'DII'],
-                        'Buy Value (₹ Cr)': [
-                            float(fii_entry.get('buyValue', 0)),
-                            float(dii_entry.get('buyValue', 0))
-                        ],
-                        'Sell Value (₹ Cr)': [
-                            float(fii_entry.get('sellValue', 0)),
-                            float(dii_entry.get('sellValue', 0))
-                        ],
-                        'Net Value (₹ Cr)': [fii_net, dii_net]
-                    }
-                    
-                    detail_df = pd.DataFrame(detail_data)
-                    
-                    # Style the dataframe
-                    def highlight_net(row):
-                        if row['Net Value (₹ Cr)'] > 0:
-                            return [''] * 3 + ['background-color: #90EE90; color: #000000']
-                        elif row['Net Value (₹ Cr)'] < 0:
-                            return [''] * 3 + ['background-color: #FFB6C1; color: #000000']
-                        return [''] * 4
-                    
-                    styled_detail = detail_df.style.apply(highlight_net, axis=1).format({
-                        'Buy Value (₹ Cr)': '{:,.2f}',
-                        'Sell Value (₹ Cr)': '{:,.2f}',
-                        'Net Value (₹ Cr)': '{:,.2f}'
-                    })
-                    
-                    st.dataframe(styled_detail, use_container_width=True, height=150)
-                    
-                    # Visualizations
-                    st.markdown("---")
-                    st.subheader("📊 Visualizations")
-                    
-                    # 1. Net Value Comparison
+                    # Charts
                     col1, col2 = st.columns(2)
                     
                     with col1:
+                        # Net Value Comparison
                         fig_net = go.Figure()
                         
                         colors = ['#26a69a' if val >= 0 else '#ef5350' for val in [fii_net, dii_net]]
@@ -2234,17 +2368,21 @@ with tab5:
                             x=['FII/FPI', 'DII'],
                             y=[fii_net, dii_net],
                             marker_color=colors,
-                            text=[f'₹{fii_net:,.0f}', f'₹{dii_net:,.0f}'],
+                            text=[f'₹{fii_net:,.0f} Cr', f'₹{dii_net:,.0f} Cr'],
                             textposition='outside',
+                            textfont=dict(size=12, family='Arial Black'),
                             name='Net Value'
                         ))
                         
                         fig_net.add_hline(y=0, line_dash="solid", line_color="gray", line_width=1)
                         
                         fig_net.update_layout(
-                            title="FII vs DII - Net Value",
+                            title={
+                                'text': f"{segment_name} - Net Value Comparison",
+                                'font': {'size': 16, 'family': 'Arial Black'}
+                            },
                             yaxis_title="Net Value (₹ Crores)",
-                            xaxis_title="Category",
+                            xaxis_title="Investor Type",
                             height=400,
                             showlegend=False
                         )
@@ -2252,46 +2390,116 @@ with tab5:
                         st.plotly_chart(fig_net, use_container_width=True)
                     
                     with col2:
-                        # Buy vs Sell comparison
+                        # Buy vs Sell
                         fig_buy_sell = go.Figure()
                         
                         fig_buy_sell.add_trace(go.Bar(
                             name='Buy',
                             x=['FII/FPI', 'DII'],
-                            y=[float(fii_entry.get('buyValue', 0)), float(dii_entry.get('buyValue', 0))],
+                            y=[fii_data['buy'], dii_data['buy']],
                             marker_color='#4CAF50',
-                            text=[f"₹{float(fii_entry.get('buyValue', 0)):,.0f}", f"₹{float(dii_entry.get('buyValue', 0)):,.0f}"],
-                            textposition='outside'
+                            text=[f"₹{fii_data['buy']:,.0f} Cr", f"₹{dii_data['buy']:,.0f} Cr"],
+                            textposition='outside',
+                            textfont=dict(size=11, family='Arial Black', color='#4CAF50')
                         ))
                         
                         fig_buy_sell.add_trace(go.Bar(
                             name='Sell',
                             x=['FII/FPI', 'DII'],
-                            y=[float(fii_entry.get('sellValue', 0)), float(dii_entry.get('sellValue', 0))],
+                            y=[fii_data['sell'], dii_data['sell']],
                             marker_color='#ef5350',
-                            text=[f"₹{float(fii_entry.get('sellValue', 0)):,.0f}", f"₹{float(dii_entry.get('sellValue', 0)):,.0f}"],
-                            textposition='outside'
+                            text=[f"₹{fii_data['sell']:,.0f} Cr", f"₹{dii_data['sell']:,.0f} Cr"],
+                            textposition='outside',
+                            textfont=dict(size=11, family='Arial Black', color='#ef5350')
                         ))
                         
                         fig_buy_sell.update_layout(
-                            title="Buy vs Sell Activity",
+                            title={
+                                'text': f"{segment_name} - Buy vs Sell Activity",
+                                'font': {'size': 16, 'family': 'Arial Black'}
+                            },
                             yaxis_title="Value (₹ Crores)",
-                            xaxis_title="Category",
+                            xaxis_title="Investor Type",
                             height=400,
-                            barmode='group'
+                            barmode='group',
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="right",
+                                x=1
+                            )
                         )
                         
                         st.plotly_chart(fig_buy_sell, use_container_width=True)
                     
-                    # 3. Pie chart - Market participation
+                    # Pie charts
                     st.markdown("---")
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        # Total buy participation
                         fig_buy_pie = go.Figure(data=[go.Pie(
                             labels=['FII/FPI', 'DII'],
-                            values=[float(fii_entry.get('buyValue', 0)), float(dii_entry.get('buyValue', 0))],
+                            values=[fii_data['buy'], dii_data['buy']],
+                            hole=0.4,
+                            marker_colors=['#2196F3', '#FF9800'],
+                            textinfo='label+percent+value',
+                            texttemplate='<b>%{label}</b><br>%{percent}<br>₹%{value:,.0f} Cr',
+                            textfont=dict(size=11, family='Arial Black')
+                        )])
+                        
+                        fig_buy_pie.update_layout(
+                            title={
+                                'text': f"{segment_name} - Buy Distribution",
+                                'font': {'size': 16, 'family': 'Arial Black'}
+                            },
+                            height=350,
+                            showlegend=True
+                        )
+                        
+                        st.plotly_chart(fig_buy_pie, use_container_width=True)
+                    
+                    with col2:
+                        fig_sell_pie = go.Figure(data=[go.Pie(
+                            labels=['FII/FPI', 'DII'],
+                            values=[fii_data['sell'], dii_data['sell']],
+                            hole=0.4,
+                            marker_colors=['#E91E63', '#9C27B0'],
+                            textinfo='label+percent+value',
+                            texttemplate='<b>%{label}</b><br>%{percent}<br>₹%{value:,.0f} Cr',
+                            textfont=dict(size=11, family='Arial Black')
+                        )])
+                        
+                        fig_sell_pie.update_layout(
+                            title={
+                                'text': f"{segment_name} - Sell Distribution",
+                                'font': {'size': 16, 'family': 'Arial Black'}
+                            },
+                            height=350,
+                            showlegend=True
+                        )
+                        
+                        st.plotly_chart(fig_sell_pie, use_container_width=True)
+                
+                # TAB 2: CASH/EQUITY
+                with segment_tabs[1]:
+                    create_segment_tab("Cash/Equity", "FII_Cash/Equity", "DII_Cash/Equity")
+                
+                # TAB 3: INDEX FUTURES
+                with segment_tabs[2]:
+                    create_segment_tab("Index Futures", "FII_Index Futures", "DII_Index Futures")
+                
+                # TAB 4: INDEX OPTIONS
+                with segment_tabs[3]:
+                    create_segment_tab("Index Options", "FII_Index Options", "DII_Index Options")
+                
+                # TAB 5: STOCK FUTURES
+                with segment_tabs[4]:
+                    create_segment_tab("Stock Futures", "FII_Stock Futures", "DII_Stock Futures")
+                
+            except Exception as e:
+                st.error(f"Error parsing data: {e}")
+                st.json(fii_dii_data)))],
                             hole=0.4,
                             marker_colors=['#2196F3', '#FF9800'],
                             textinfo='label+percent',
@@ -2374,25 +2582,6 @@ with tab5:
             - [MoneyControl FII/DII Activity](https://www.moneycontrol.com/stocks/marketstats/fii_dii_activity/index.php)
             - [Economic Times Markets Data](https://economictimes.indiatimes.com/markets/stocks/fii-dii-data)
             """)
-            
-            # Show sample data structure
-            st.markdown("---")
-            st.subheader("📊 Sample FII/DII Data Structure")
-            
-            sample_data = {
-                'date': ['2024-01-15', '2024-01-16', '2024-01-17'],
-                'fii_buy_value': [5000, 5500, 4800],
-                'fii_sell_value': [4500, 5200, 5100],
-                'fii_net_value': [500, 300, -300],
-                'dii_buy_value': [3000, 3200, 3500],
-                'dii_sell_value': [2800, 2900, 3000],
-                'dii_net_value': [200, 300, 500]
-            }
-            
-            sample_df = pd.DataFrame(sample_data)
-            st.dataframe(sample_df, use_container_width=True)
-            
-            st.caption("💡 All values in ₹ Crores")
 
 # Footer
 st.markdown("---")
