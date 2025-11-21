@@ -307,55 +307,198 @@ def get_option_iv_from_google(symbol, strike, expiry_date, option_type='CE'):
 
 def fetch_fii_dii_data():
     """
-    Fetch FII/DII data from NSE or other sources
+    Fetch FII/DII data from NSE public API
     Returns data for Cash, Index Futures, Index Options, and Stock Futures
     """
     try:
-        # NSE FII/DII data URL
         url = "https://www.nseindia.com/api/fiidiiTradeReact"
         
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
-            'Accept-Language': 'en-US,en;q=0.9',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Referer': 'https://www.nseindia.com/',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin'
         }
         
+        # Create session to maintain cookies
         session = requests.Session()
-        # First request to get cookies
-        session.get("https://www.nseindia.com", headers=headers, timeout=10)
         
-        # Second request to get actual data
-        response = session.get(url, headers=headers, timeout=10)
+        # First, visit the main NSE page to get cookies
+        try:
+            session.get("https://www.nseindia.com/", headers=headers, timeout=10)
+        except:
+            pass
         
-        if response.status_code == 200:
-            data = response.json()
+        # Add a small delay
+        time.sleep(0.5)
+        
+        # Now fetch the FII/DII data with timeout
+        response = session.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Check if data is valid
+        if isinstance(data, dict) and 'data' in data:
+            return data['data']
+        elif isinstance(data, list):
             return data
+        else:
+            return data
+        
+    except requests.exceptions.Timeout:
+        print("Timeout: Request took too long")
+        return None
+    except requests.exceptions.ConnectionError:
+        print("Connection Error: Unable to connect to NSE")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"Request error: {e}")
         return None
     except Exception as e:
         print(f"Error fetching FII/DII data: {e}")
         return None
 
+
 def parse_fii_dii_data(data):
-    """Parse FII/DII JSON data into dataframe"""
+    """Parse FII/DII JSON data into structured format"""
     try:
         if not data:
             return None
         
-        # Extract relevant data
-        fii_dii_records = []
+        parsed_data = {}
         
-        # Parse the data structure
-        for entry in data:
-            if isinstance(entry, dict):
-                fii_dii_records.append(entry)
+        # Ensure data is a list
+        if isinstance(data, dict):
+            if 'data' in data:
+                entries = data['data']
+            else:
+                entries = [data]
+        else:
+            entries = data if isinstance(data, list) else [data]
         
-        if fii_dii_records:
-            df = pd.DataFrame(fii_dii_records)
-            return df
-        return None
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            
+            # Get category and date
+            category = entry.get('category', '') or entry.get('segment', '')
+            date = entry.get('date', '')
+            
+            if not category:
+                continue
+            
+            # Parse investor type
+            if 'FII' in category.upper() or 'FPI' in category.upper():
+                investor_type = 'FII'
+            elif 'DII' in category.upper():
+                investor_type = 'DII'
+            else:
+                continue
+            
+            # Determine market segment - case insensitive
+            category_upper = category.upper()
+            if 'INDEX' in category_upper and 'FUT' in category_upper:
+                segment = 'Index Futures'
+            elif 'INDEX' in category_upper and 'OPT' in category_upper:
+                segment = 'Index Options'
+            elif 'STOCK' in category_upper and 'FUT' in category_upper:
+                segment = 'Stock Futures'
+            elif 'STOCK' in category_upper and 'OPT' in category_upper:
+                segment = 'Stock Options'
+            elif 'CASH' in category_upper or 'EQUITY' in category_upper:
+                segment = 'Cash/Equity'
+            else:
+                segment = category.strip()
+            
+            # Extract and clean values
+            try:
+                buy_val = entry.get('buyValue', 0)
+                if isinstance(buy_val, str):
+                    buy_val = float(buy_val.replace(',', ''))
+                else:
+                    buy_val = float(buy_val)
+            except (ValueError, TypeError):
+                buy_val = 0.0
+            
+            try:
+                sell_val = entry.get('sellValue', 0)
+                if isinstance(sell_val, str):
+                    sell_val = float(sell_val.replace(',', ''))
+                else:
+                    sell_val = float(sell_val)
+            except (ValueError, TypeError):
+                sell_val = 0.0
+            
+            try:
+                net_val = entry.get('netValue', 0)
+                if isinstance(net_val, str):
+                    net_val = float(net_val.replace(',', ''))
+                else:
+                    net_val = float(net_val)
+            except (ValueError, TypeError):
+                net_val = buy_val - sell_val
+            
+            key = f"{investor_type}_{segment}"
+            parsed_data[key] = {
+                'buy': buy_val,
+                'sell': sell_val,
+                'net': net_val,
+                'date': date
+            }
+        
+        return parsed_data if parsed_data else None
+        
     except Exception as e:
         print(f"Error parsing FII/DII data: {e}")
         return None
+
+
+def get_fii_dii_with_fallback():
+    """
+    Fetch FII/DII data with fallback mechanism
+    """
+    # Try primary source
+    raw_data = fetch_fii_dii_data()
+    
+    if raw_data:
+        parsed = parse_fii_dii_data(raw_data)
+        if parsed and len(parsed) > 0:
+            return parsed
+    
+    # If primary fails, try again with longer timeout
+    try:
+        url = "https://www.nseindia.com/api/fiidiiTradeReact"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+        }
+        session = requests.Session()
+        session.get("https://www.nseindia.com/", headers=headers, timeout=15)
+        time.sleep(1)
+        
+        response = session.get(url, headers=headers, timeout=20)
+        if response.status_code == 200:
+            data = response.json()
+            parsed = parse_fii_dii_data(data)
+            if parsed and len(parsed) > 0:
+                return parsed
+    except Exception as e:
+        print(f"Fallback error: {e}")
+    
+    return None
+
+
 
 def get_options_chain(symbol, expiry_date):
     """Fetch options chain with IV calculation"""
